@@ -1,0 +1,17 @@
+import { NextRequest, NextResponse } from "next/server";
+import { initDb, pool } from "@/lib/db";
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ slug: string }> },
+) {
+  await initDb();
+  const { slug } = await params;
+
+  const result = await pool.query(`SELECT * FROM events WHERE slug = $1`, [slug]);
+  if (result.rows.length === 0) {
+    return NextResponse.json({ error: "Event not found" }, { status: 404 });
+  }
+
+  return NextResponse.json(result.rows[0]);
+}
