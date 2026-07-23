@@ -13,6 +13,7 @@
     "db:down": "docker compose stop"
   },
   "dependencies": {
+    "lucide-react": "^1.26.0",
     "nanoid": "^6.0.0",
     "next": "16.2.11",
     "pg": "^8.22.0",

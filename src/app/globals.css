@@ -1,26 +1,63 @@
 @import "tailwindcss";
 
+/* Color tokens and typography per theme.md. Light values are the default;
+   dark values apply under prefers-color-scheme, matching the reference
+   project's "CSS variables, never literal Tailwind colors" convention. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --color-bg-base: #fbf6ee;
+  --color-bg-raised: #ffffff;
+  --color-text-primary: #2b2521;
+  --color-text-muted: #6b6259;
+  --color-accent-coral: #e4633f;
+  --color-accent-coral-text: #b8431f;
+  --color-on-coral: #ffffff;
+  --color-accent-sage: #4f6b4c;
+  --color-accent-lavender: #69579c;
+  --color-border: #e8dfd1;
+  --color-danger: #c4382b;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg-base: var(--color-bg-base);
+  --color-bg-raised: var(--color-bg-raised);
+  --color-text-primary: var(--color-text-primary);
+  --color-text-muted: var(--color-text-muted);
+  --color-accent-coral: var(--color-accent-coral);
+  --color-accent-coral-text: var(--color-accent-coral-text);
+  --color-on-coral: var(--color-on-coral);
+  --color-accent-sage: var(--color-accent-sage);
+  --color-accent-lavender: var(--color-accent-lavender);
+  --color-border: var(--color-border);
+  --color-danger: var(--color-danger);
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --color-bg-base: #1e1b19;
+    --color-bg-raised: #2a2522;
+    --color-text-primary: #f3ece3;
+    --color-text-muted: #b7ada2;
+    --color-accent-coral: #f0916f;
+    --color-accent-coral-text: #f0916f;
+    --color-on-coral: #2b1710;
+    --color-accent-sage: #9bc198;
+    --color-accent-lavender: #b9a8e0;
+    --color-border: #3a332e;
+    --color-danger: #e8776a;
   }
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
 }

@@ -2,6 +2,15 @@
 
 Narrative decisions and working style for this RSVP project. Read `SYSTEM_MEMORY.md` first for current architecture/schema/routes; this file explains why settled choices exist and how to work with the user.
 
+## Critical — Read First
+
+- **Never blanket-kill Chrome.** The user actively uses their own Chrome browser alongside this work. For any headless/scripted browser check (screenshots, visual verification):
+  1. Launch a separate headless instance with a unique `--user-data-dir` and `--remote-debugging-port=9222`, pointed at `about:blank` (not the target URL directly):
+     - PowerShell: `& "C:\Program Files\Google\Chrome\Application\chrome.exe" --headless=new --remote-debugging-port=9222 --user-data-dir="$env:TEMP\chrome-headless-test-$(Get-Random)" --no-first-run about:blank`
+     - Git Bash: `"/c/Program Files/Google/Chrome/Application/chrome.exe" --headless=new --remote-debugging-port=9222 --user-data-dir="/c/Users/$USER/AppData/Local/Temp/chrome-headless-test-$RANDOM" --no-first-run about:blank`
+  2. Open tabs via the CDP HTTP endpoint (`PUT http://localhost:9222/json/new?<url>`), then drive/inspect/screenshot over CDP — don't pass the target URL as a launch arg.
+  3. When done, stop ONLY that specific PID (find it via `netstat`/`Get-Process` filtered on port 9222 or the scratch profile path — never `taskkill /IM chrome.exe` or any name-based kill) and delete its `--user-data-dir` scratch profile.
+
 ## What this project is
 
 An RSVP website. A host creates an RSVP page one of two ways, gets a shareable link, and guests open that link to RSVP:
@@ -10,6 +19,8 @@ An RSVP website. A host creates an RSVP page one of two ways, gets a shareable l
 - **Build a template here** — host fills in event details and picks a few RSVP questions (attending y/n, guest count, free-text/yes-no questions). We host the actual form and store responses.
 
 Current milestone (2026-07-23): get a working end-to-end proof of concept for both flows — not a polished/customizable product yet. The user explicitly wants to first prove "yeah this CAN work" before expanding scope.
+
+The app has two audiences that will get separate pages: **RSVP Sender** (a host creating/managing an RSVP) and **RSVP Receiver** (a guest RSVPing) — named directly after the reference project's own Kitchen Portal / Customer Tracker split. `/` is now an admin gateway page with dud nav links to both (plus Access DB), built 2026-07-23 as a structural placeholder before either flow gets built out for real.
 
 ## The User and Working Style
 
@@ -30,12 +41,19 @@ The other project's `reference/OTHER_PROJECT_SYSTEM_MEMORY.md` describes what wo
 
 Do not copy over anything specific to the other project's own domain (orders, kitchens, admin roles) — only the general tooling/graphics approach applies here.
 
+**Theme is now decided and implemented, not just referenced.** `theme.md` (2026-07-23) is this project's own research-backed color/typography decision — explicitly NOT a copy of the reference project's "warm bistro" theme (user was emphatic about this: "no using theme from the reference files please"). Fonts are Bricolage Grotesque + Plus Jakarta Sans (not the reference's Fraunces/Nunito Sans); palette is coral/sage/lavender on warm cream/charcoal (not the reference's own bistro palette). Icons are `lucide-react` (this one IS the same package as the reference project, and the user explicitly confirmed reusing it: "keep it with lucide react. lucide react is on order tracker and it's awesome") — never emoji, which was tried first and rejected as looking low-effort and ignoring theme color tokens.
+
+The admin gateway page layout (sidebar nav + top-right status/settings pill + Log Out) is structurally modeled on the reference project's own admin gateway screenshot the user shared — same layout skeleton, entirely different visual system (colors/fonts/icons) on top of it. Not mobile-responsive by explicit instruction ("we're not focusing on mobile rn").
+
 ## Decisions Not to Re-Litigate Casually
 
 - Postgres is the datastore, matching the other project's familiar patterns (`pg` client, no ORM). Local dev expects a reachable `DATABASE_URL` (see `.env.local.example`).
 - Template builder starts as a simple form (title/description/date/location + a flat list of text/yes-no questions). No drag-and-drop visual editor, no per-event custom theming yet — that's explicitly deferred until the base flow is proven out.
 - Slugs are short random strings (`nanoid`, non-guessable alphabet excluding ambiguous characters), not sequential ids — event links are meant to be shared/public.
 - `initDb()` runs idempotent `CREATE TABLE IF NOT EXISTS` migrations on first DB access per process, same memoized-promise pattern as the other project. If the schema changes, everyone hitting the app after a deploy/restart gets migrated automatically — no separate migration runner yet at this stage.
+- **Dev server runs on port 3001, not Next's default 3000.** The user's other project (restaurant order tracker) already occupies 3000 and both may run side by side ("order tracker uses port 3000, so this should use 3001," 2026-07-23). Applies everywhere: `package.json` scripts, `startup`/`shutdown` scripts, README.
+- **`/` is the admin gateway; `/admin` is a redirect to `/`, not the other way around.** User's explicit framing: "localhost:3001 should be the admin page. /admin should redirect to localhost:3001, and if it's like /admin/smthoverhere then that's fine." So `/admin/db`, `/admin/sender` etc. (future real subroutes) live as actual pages under `/admin/*`, but the bare `/admin` path itself is just a redirect, and `/` is canonical — confirmed explicitly over the alternative (`/admin` canonical, `/` redirects) via a direct question.
+- **`npm run stop:all` / `db:down` fully quit Docker Desktop and run `wsl --shutdown`, not just stop the Postgres container.** User explicitly wants this as the default behavior (confirmed via direct question, "yes, do it by default") despite it affecting the whole machine, not just this project. `npm run start:all` correspondingly auto-launches Docker Desktop if it's not running (progress bar, up to 90s wait) rather than erroring out — launching Docker Desktop also brings up WSL as a side effect (its backend runs on the WSL2 engine), so no separate WSL-launch step was needed on the startup side, only shutdown needs its own explicit `wsl --shutdown` call.
 
 ## Update Discipline
 
