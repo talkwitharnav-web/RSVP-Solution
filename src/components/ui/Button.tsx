@@ -1,0 +1,31 @@
+"use client";
+
+import { ButtonHTMLAttributes, FC } from "react";
+
+type Variant = "primary" | "secondary" | "danger" | "ghost";
+type Size = "md" | "lg";
+
+const variantClasses: Record<Variant, string> = {
+  primary:
+    "bg-[var(--color-accent-coral-text)] text-[var(--color-on-coral)] hover:opacity-90 disabled:bg-[var(--color-surface-2)] disabled:text-[var(--color-text-muted)] disabled:opacity-100",
+  secondary:
+    "bg-[var(--color-surface-2)] text-[var(--color-text-primary)] border border-[var(--color-border-strong)] hover:bg-[var(--color-border-strong)] disabled:opacity-50",
+  danger: "bg-[var(--color-danger)] text-white hover:opacity-90 disabled:opacity-50",
+  ghost: "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] disabled:opacity-50",
+};
+
+const sizeClasses: Record<Size, string> = {
+  md: "px-4 py-2 text-sm",
+  lg: "px-6 py-3.5 text-base",
+};
+
+export const Button: FC<
+  ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: Size }
+> = ({ variant = "primary", size = "md", className = "", ...props }) => {
+  return (
+    <button
+      className={`inline-flex items-center justify-center gap-2 rounded-[var(--radius-sm)] font-semibold transition-all duration-150 active:scale-95 disabled:cursor-not-allowed disabled:active:scale-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-coral-text)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-0)] ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
+      {...props}
+    />
+  );
+};

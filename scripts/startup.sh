@@ -6,16 +6,15 @@
 # relative to this script's own location, so it works the same on any
 # machine the repo is cloned/copied to.
 #
-# What it does, in order, being verbose about every step:
-#   1. Check Node.js is installed (and print the version).
+# What it does, in order:
+#   1. Check Node.js is installed.
 #   2. Check npm is installed.
 #   3. Check Docker is installed.
 #   4. Check Docker Desktop is running -- if not, LAUNCH it and wait for the
 #      engine to come up (this also brings up WSL, since Docker Desktop's
 #      backend runs on the WSL2 engine -- no separate WSL start needed).
 #   5. Check/create .env.local (copies from .env.local.example if missing).
-#   6. Check/install npm dependencies (npm ci if a lockfile exists and
-#      node_modules is missing/stale, else npm install).
+#   6. Check/install npm dependencies.
 #   7. Start the Postgres container via docker compose.
 #   8. Start the dev server (npm run dev).
 
@@ -70,29 +69,55 @@ ok "Docker found: $(docker --version)"
 # 4. Docker actually running (auto-launch Docker Desktop if not)
 # ---------------------------------------------------------------------------
 step "Checking Docker is running..."
-if docker info >/dev/null 2>&1; then
+docker_ready() { docker info >/dev/null 2>&1; }
+
+if docker_ready; then
     ok "Docker is already running."
 else
-    info "Docker is not running -- launching Docker Desktop..."
+    info "Docker is not running -- looking for Docker Desktop..."
+
     DOCKER_DESKTOP_EXE="/c/Program Files/Docker/Docker/Docker Desktop.exe"
     if [ ! -f "$DOCKER_DESKTOP_EXE" ]; then
-        err "Docker is installed but Docker Desktop.exe was not found at the expected path."
-        info "Start Docker Desktop yourself (it can take 10-30s to finish starting up), then re-run this script."
+        # Fallback: ask PowerShell to check the registry for a nonstandard
+        # install location, rather than hard-failing on the one fixed path.
+        found="$(powershell -NoProfile -Command '
+            $p = "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+            foreach ($k in @(
+                "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop",
+                "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop"
+            )) {
+                if (Test-Path $k) {
+                    $loc = (Get-ItemProperty -Path $k -ErrorAction SilentlyContinue).InstallLocation
+                    if ($loc) {
+                        $candidate = Join-Path $loc "Docker Desktop.exe"
+                        if (Test-Path $candidate) { Write-Output $candidate; exit }
+                    }
+                }
+            }
+        ' 2>/dev/null | tr -d '\r')"
+        if [ -n "$found" ]; then
+            DOCKER_DESKTOP_EXE="$found"
+        fi
+    fi
+
+    if [ ! -f "$DOCKER_DESKTOP_EXE" ]; then
+        err "Docker is installed but Docker Desktop.exe could not be found (checked the standard path and the registry)."
+        info "Start Docker Desktop yourself, then re-run this script."
         exit 1
     fi
+
     # Launched detached so this script doesn't block on the GUI process.
     "$DOCKER_DESKTOP_EXE" >/dev/null 2>&1 &
     disown 2>/dev/null || true
 
-    docker_ready() { docker info >/dev/null 2>&1; }
     # Cold start (including its WSL2 backend) can genuinely take 60s+ the
     # first time; 90s gives real headroom without hanging forever if
     # something's actually wrong.
-    if wait_progress "Starting Docker Desktop" 90 2 docker_ready; then
-        ok "Docker Desktop is up."
+    if wait_for "Docker Desktop is up" 90 3 docker_ready; then
+        :
     else
-        err "Docker Desktop did not report ready within 90 seconds."
-        info "Open Docker Desktop and check for an error dialog, then re-run this script."
+        err "Docker Desktop did not become ready within 90 seconds."
+        info "Open Docker Desktop yourself and check for an error dialog, then re-run this script."
         exit 1
     fi
 fi
@@ -119,7 +144,17 @@ step "Checking npm dependencies..."
 cd "$REPO_ROOT"
 if [ ! -d "$REPO_ROOT/node_modules" ]; then
     info "node_modules missing -- installing dependencies (this may take a minute)..."
-    if [ -f "$REPO_ROOT/package-lock.json" ]; then npm ci; else npm install; fi
+    if [ -f "$REPO_ROOT/package-lock.json" ]; then
+        npm ci
+    else
+        npm install
+    fi
+    install_status=$?
+    if [ "$install_status" -ne 0 ]; then
+        err "npm install failed (exit code $install_status). See output above."
+        info "Common fixes: check your internet connection, or delete node_modules and package-lock.json and try again."
+        exit 1
+    fi
     ok "Dependencies installed."
 else
     ok "node_modules already present. (Run 'npm install' yourself if package.json changed.)"
@@ -133,24 +168,19 @@ if [ ! -f "$REPO_ROOT/docker-compose.yml" ]; then
     err "docker-compose.yml not found."
     exit 1
 fi
-(cd "$REPO_ROOT" && docker compose up -d)
+if ! (cd "$REPO_ROOT" && docker compose up -d); then
+    err "docker compose up failed. See output above."
+    info "If Docker Desktop just started, wait a few seconds and try running this script again."
+    exit 1
+fi
 ok "Postgres container is up (or was already running)."
 
-info "Waiting for Postgres to accept connections..."
-waited=0
-ready=0
-while [ "$waited" -lt 30 ]; do
-    if docker exec rsvp-postgres-1 pg_isready -U postgres >/dev/null 2>&1; then
-        ready=1
-        break
-    fi
-    sleep 2
-    waited=$((waited + 2))
-done
-if [ "$ready" -eq 1 ]; then
-    ok "Postgres is ready."
+postgres_ready() { docker exec rsvp-postgres-1 pg_isready -U postgres >/dev/null 2>&1; }
+if wait_for "Postgres is ready" 30 2 postgres_ready; then
+    :
 else
-    warn "Postgres did not report ready within 30 seconds -- it may still be starting. Continuing anyway."
+    warn "Postgres did not report ready within 30 seconds -- it may still be starting."
+    info "Continuing anyway. If the app can't reach the database, run 'docker compose logs postgres' to check."
 fi
 
 # ---------------------------------------------------------------------------

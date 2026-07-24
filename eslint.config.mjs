@@ -13,6 +13,15 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    // server.js is a plain CJS Node entrypoint (not bundled/transpiled by
+    // Next), so require() is the correct, intentional import style here --
+    // matches the reference project's same carve-out for its own server.js.
+    files: ["server.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

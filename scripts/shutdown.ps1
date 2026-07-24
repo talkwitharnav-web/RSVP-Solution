@@ -30,10 +30,17 @@ if ($connections) {
             $proc = Get-Process -Id $processId -ErrorAction Stop
             Write-Info "Stopping process $processId ($($proc.ProcessName)) listening on port 3001..."
             Stop-Process -Id $processId -Force
-            Write-Ok "Stopped."
         } catch {
             Write-Warn "Could not stop process $processId -- it may have already exited."
         }
+    }
+    Start-Sleep -Seconds 1
+    $stillThere = Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue
+    if ($stillThere) {
+        Write-Warn "Port 3001 still has a process listening after attempting to stop it."
+        Write-Info "You may need to close it manually (e.g. the terminal it was started in)."
+    } else {
+        Write-Ok "Stopped."
     }
 } else {
     Write-Info "No dev server found listening on port 3001. (If you started it in a terminal with Ctrl+C available, just press Ctrl+C there instead.)"
@@ -53,7 +60,7 @@ if (-not (Test-Path $composeFile)) {
         if ($LASTEXITCODE -eq 0) {
             Write-Ok "Postgres container stopped. Your data is preserved for next time."
         } else {
-            Write-Warn "docker compose stop reported an error. It may already be stopped."
+            Write-Warn "docker compose stop reported an error. It may already be stopped, or Docker Desktop may already be closed."
         }
     } finally {
         Pop-Location
@@ -73,12 +80,10 @@ if (-not $dockerDesktopProc) {
     # that linger briefly after the main window process is killed.
     Get-Process "com.docker.*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
-    $stopped = Show-WaitProgress -Activity "Shutting down Docker Desktop" -MaxWaitSeconds 30 -PollSeconds 1 -CheckDone {
+    $stopped = Wait-For -Label "Docker Desktop closed" -MaxWaitSeconds 30 -PollSeconds 2 -CheckDone {
         -not (Get-Process "Docker Desktop" -ErrorAction SilentlyContinue)
     }
-    if ($stopped) {
-        Write-Ok "Docker Desktop closed."
-    } else {
+    if (-not $stopped) {
         Write-Warn "Docker Desktop did not confirm closed within 30 seconds. It may still be shutting down in the background."
     }
 }
@@ -91,19 +96,13 @@ $wslCmd = Get-Command wsl -ErrorAction SilentlyContinue
 if (-not $wslCmd) {
     Write-Info "wsl command not found on this machine. Skipping."
 } else {
-    # `wsl --shutdown` itself blocks until WSL is down, so there's no
-    # separate process to poll -- the progress bar here just reflects the
-    # single blocking call's real elapsed time, updated as it runs.
-    $wslJob = Start-Job -ScriptBlock { wsl --shutdown }
-    $completed = Show-WaitProgress -Activity "Shutting down WSL" -MaxWaitSeconds 30 -PollSeconds 1 -CheckDone {
-        (Get-Job -Id $wslJob.Id).State -ne "Running"
-    }
-    Receive-Job -Job $wslJob -ErrorAction SilentlyContinue | Out-Null
-    Remove-Job -Job $wslJob -Force -ErrorAction SilentlyContinue
-    if ($completed) {
+    # wsl --shutdown blocks until WSL is actually down, so just run it
+    # directly and check its exit code -- no need for a background job.
+    wsl --shutdown
+    if ($LASTEXITCODE -eq 0) {
         Write-Ok "WSL shut down."
     } else {
-        Write-Warn "WSL shutdown did not confirm within 30 seconds. It may still be finishing in the background."
+        Write-Warn "wsl --shutdown reported an error (exit code $LASTEXITCODE). It may already be stopped."
     }
 }
 

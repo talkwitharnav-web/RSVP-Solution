@@ -7,33 +7,58 @@ function Write-Warn { param([string]$Message) Write-Host "    WARN: $Message" -F
 function Write-Err  { param([string]$Message) Write-Host "    ERROR: $Message" -ForegroundColor Red }
 function Write-Info { param([string]$Message) Write-Host "    $Message" -ForegroundColor DarkGray }
 
-# Renders a real progress bar driven by a caller-supplied "are we done yet"
-# check -- not a fixed-time animation. Polls $CheckDone every $PollSeconds,
-# advancing the bar toward 90% while waiting and snapping to 100% the moment
-# $CheckDone returns $true (or when $MaxWaitSeconds is hit, whichever first).
-function Show-WaitProgress {
+# Waits for a caller-supplied check scriptblock to succeed, printing one
+# plain status line every $PollSeconds (e.g. "waiting... (10s)") instead of
+# a fake progress bar -- there's no way to know real percent-complete for
+# something like "has Docker Desktop finished booting", so we don't pretend to.
+function Wait-For {
     param(
-        [string]$Activity,
+        [string]$Label,
         [scriptblock]$CheckDone,
         [int]$MaxWaitSeconds = 60,
         [int]$PollSeconds = 2
     )
     $waited = 0
-    $done = $false
     while ($waited -lt $MaxWaitSeconds) {
-        $done = & $CheckDone
-        if ($done) { break }
-        # Cap the displayed percent at 90 until we actually confirm done,
-        # so the bar never lies by claiming 100% before it's true.
-        $percent = [math]::Min(90, [math]::Floor(($waited / $MaxWaitSeconds) * 100))
-        Write-Progress -Activity $Activity -Status "$percent% (waiting...)" -PercentComplete $percent
+        if (& $CheckDone) {
+            Write-Ok $Label
+            return $true
+        }
+        Write-Info "${Label}: still waiting... (${waited}s)"
         Start-Sleep -Seconds $PollSeconds
         $waited += $PollSeconds
     }
-    if ($done) {
-        Write-Progress -Activity $Activity -Status "100%" -PercentComplete 100
-        Start-Sleep -Milliseconds 300
+    if (& $CheckDone) {
+        Write-Ok $Label
+        return $true
     }
-    Write-Progress -Activity $Activity -Completed
-    return $done
+    return $false
+}
+
+# Locates Docker Desktop's exe without assuming a fixed install path --
+# checks the standard location first, then falls back to the registry
+# uninstall-info key Docker's installer writes, so a nonstandard install
+# location doesn't hard-fail the whole script.
+function Find-DockerDesktopExe {
+    $standard = "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+    if (Test-Path $standard) { return $standard }
+
+    try {
+        $regPaths = @(
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop",
+            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop"
+        )
+        foreach ($regPath in $regPaths) {
+            if (Test-Path $regPath) {
+                $installLoc = (Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue).InstallLocation
+                if ($installLoc) {
+                    $candidate = Join-Path $installLoc "Docker Desktop.exe"
+                    if (Test-Path $candidate) { return $candidate }
+                }
+            }
+        }
+    } catch {
+        # Registry lookup is a best-effort fallback -- fall through to $null.
+    }
+    return $null
 }

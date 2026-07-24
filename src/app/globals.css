@@ -1,8 +1,10 @@
 @import "tailwindcss";
 
 /* Color tokens and typography per theme.md. Light values are the default;
-   dark values apply under prefers-color-scheme, matching the reference
-   project's "CSS variables, never literal Tailwind colors" convention. */
+   dark values apply via [data-theme="dark"] (manual toggle, set by
+   ThemeToggle + the pre-hydration script in layout.tsx) or prefers-color-scheme
+   when no manual choice has been made yet. CSS variables, never literal
+   Tailwind colors in components -- same convention as the reference project. */
 :root {
   --color-bg-base: #fbf6ee;
   --color-bg-raised: #ffffff;
@@ -15,6 +17,20 @@
   --color-accent-lavender: #69579c;
   --color-border: #e8dfd1;
   --color-danger: #c4382b;
+
+  /* Structural tokens layered on top of theme.md's flat palette, ported
+     from the reference project's radius/surface-tier system. Radius values
+     are theme-neutral (same numbers work for any palette); surface tiers
+     and border-strong are derived from our own coral/cream palette, not
+     copied from the reference's bistro colors. */
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-full: 9999px;
+  --color-surface-0: var(--color-bg-base);
+  --color-surface-1: var(--color-bg-raised);
+  --color-surface-2: #f3ead9;
+  --color-border-strong: #d8c6a3;
+  --color-success: #4f6b4c;
 }
 
 @theme inline {
@@ -29,12 +45,17 @@
   --color-accent-lavender: var(--color-accent-lavender);
   --color-border: var(--color-border);
   --color-danger: var(--color-danger);
+  --color-surface-0: var(--color-surface-0);
+  --color-surface-1: var(--color-surface-1);
+  --color-surface-2: var(--color-surface-2);
+  --color-border-strong: var(--color-border-strong);
+  --color-success: var(--color-success);
   --font-display: var(--font-display);
   --font-body: var(--font-body);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --color-bg-base: #1e1b19;
     --color-bg-raised: #2a2522;
     --color-text-primary: #f3ece3;
@@ -46,7 +67,26 @@
     --color-accent-lavender: #b9a8e0;
     --color-border: #3a332e;
     --color-danger: #e8776a;
+    --color-surface-2: #362b23;
+    --color-border-strong: #4f4034;
+    --color-success: #9bc198;
   }
+}
+:root[data-theme="dark"] {
+  --color-bg-base: #1e1b19;
+  --color-bg-raised: #2a2522;
+  --color-text-primary: #f3ece3;
+  --color-text-muted: #b7ada2;
+  --color-accent-coral: #f0916f;
+  --color-accent-coral-text: #f0916f;
+  --color-on-coral: #2b1710;
+  --color-accent-sage: #9bc198;
+  --color-accent-lavender: #b9a8e0;
+  --color-border: #3a332e;
+  --color-danger: #e8776a;
+  --color-surface-2: #362b23;
+  --color-border-strong: #4f4034;
+  --color-success: #9bc198;
 }
 
 body {
@@ -60,4 +100,174 @@ h2,
 h3,
 h4 {
   font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Interface size (S/M/B) -- independent of theme/contrast, same rationale
+   as the reference project: everything else is sized in rem/em off this one
+   root font-size, so changing it here scales the whole layout at once. */
+html {
+  transition: font-size 0.35s ease;
+}
+html[data-ui-size="small"] {
+  font-size: 87.5%;
+}
+html[data-ui-size="big"] {
+  font-size: 125%;
+}
+
+/* Reduce Motion -- WCAG 2.3.3. Both the standard media query (OS-level
+   preference, no toggle needed) and a manual [data-motion="reduced"]
+   override collapse every animation/transition to effectively instant. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+[data-motion="reduced"],
+[data-motion="reduced"] *,
+[data-motion="reduced"] *::before,
+[data-motion="reduced"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* High Contrast -- stronger text/border contrast for low vision. */
+[data-contrast="high"] {
+  --color-text-muted: var(--color-text-primary);
+  --color-border: var(--color-border-strong);
+}
+
+/* Enhanced Focus Outline -- WCAG 2.4.7/2.4.11. Deliberately not tied to
+   --color-accent-coral: a keyboard user with low vision benefits from a
+   focus indicator that doesn't depend on correctly perceiving brand hue. */
+[data-focus="enhanced"] :focus-visible {
+  outline: 3px solid #2563eb !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.35) !important;
+}
+
+/* Colorblind-friendly palettes -- swap the two accent colors most likely to
+   collide for a given color-vision type. Off by default ("data-cvd" unset). */
+[data-cvd="deuteranopia"],
+[data-cvd="protanopia"] {
+  --color-accent-coral: #d97a06;
+  --color-accent-coral-text: #a35c04;
+  --color-accent-sage: #2b6ca3;
+}
+[data-cvd="tritanopia"] {
+  --color-accent-coral: #d94f6a;
+  --color-accent-coral-text: #a83955;
+  --color-accent-lavender: #2b7a6c;
+}
+
+/* Reserved top-right clearance -- see lib/useReservedTopRight.ts.
+   SettingsToggles is a `fixed` top-right pill whose width isn't constant;
+   in-flow content that also wants the top-right corner reserves space via
+   this variable instead of a guessed padding number. Not mobile-responsive
+   by explicit instruction -- this project isn't focusing on mobile yet. */
+:root {
+  --reserved-top-right-w: 190px;
+  --reserved-top-right-h: 36px;
+}
+.clear-top-right {
+  padding-right: calc(var(--reserved-top-right-w) + 16px);
+}
+
+/* Shared "graceful reveal" for hover/click popovers and dropdowns
+   (HealthPin's stats card, ThemedTooltip, AccessibilityMenu's panel). */
+@keyframes dropdown-reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scaleY(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+}
+@keyframes dropdown-reveal-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-6px) scaleY(0.96);
+  }
+}
+.dropdown-reveal {
+  transform-origin: top center;
+  animation: dropdown-reveal-in 0.18s ease-out backwards;
+}
+.dropdown-reveal-out {
+  transform-origin: top center;
+  animation: dropdown-reveal-out 0.15s ease-in forwards;
+}
+
+/* Settings toolbar ravel/unravel. The pill stays fixed to the viewport's
+   right edge, so changing only its measured width makes it grow naturally
+   toward the left. Plain solid surface -- no glaze/blur layer in this pass. */
+.settings-pill {
+  border-radius: var(--radius-md);
+  transition:
+    width 0.26s cubic-bezier(0.4, 0, 1, 1),
+    border-radius 0.26s cubic-bezier(0.4, 0, 1, 1);
+}
+.settings-pill-content {
+  transform-origin: right center;
+  transition: opacity 0.18s ease, transform 0.26s cubic-bezier(0.4, 0, 1, 1);
+}
+.settings-pill-reveal-window {
+  border-radius: inherit;
+}
+.settings-pill-content-collapsed {
+  opacity: 0;
+  transform: translateX(10px) scaleX(0.94);
+  pointer-events: none;
+}
+.settings-pill-content-expanded {
+  opacity: 1;
+  transform: translateX(0) scaleX(1);
+  transition-duration: 0.32s, 0.42s;
+  transition-timing-function: ease, cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition-delay: 0.08s, 0s;
+}
+@keyframes settings-pill-toggle-pop {
+  0% {
+    opacity: 0;
+    transform: rotate(-35deg) scale(0.72);
+  }
+  65% {
+    opacity: 1;
+    transform: rotate(5deg) scale(1.12);
+  }
+  100% {
+    opacity: 1;
+    transform: rotate(0) scale(1);
+  }
+}
+.settings-pill-toggle-icon {
+  animation: settings-pill-toggle-pop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Live status dot (HealthPin) -- gentle pulse, collapses under Reduce Motion
+   via the blanket override above. */
+@keyframes health-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+.animate-health-pulse {
+  animation: health-pulse 2s ease-in-out infinite;
 }

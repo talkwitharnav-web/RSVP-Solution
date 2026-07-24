@@ -5,16 +5,15 @@
 # relative to this script's own location, so it works the same on any
 # machine the repo is cloned/copied to.
 #
-# What it does, in order, being verbose about every step:
-#   1. Check Node.js is installed (and print the version).
+# What it does, in order:
+#   1. Check Node.js is installed.
 #   2. Check npm is installed.
 #   3. Check Docker Desktop is installed.
 #   4. Check Docker Desktop is running -- if not, LAUNCH it and wait for the
 #      engine to come up (this also brings up WSL, since Docker Desktop's
 #      backend runs on the WSL2 engine -- no separate WSL start needed).
 #   5. Check/create .env.local (copies from .env.local.example if missing).
-#   6. Check/install npm dependencies (npm ci if a lockfile exists and
-#      node_modules is missing/stale, else npm install).
+#   6. Check/install npm dependencies.
 #   7. Start the Postgres container via docker compose.
 #   8. Start the dev server (npm run dev).
 
@@ -37,8 +36,7 @@ if (-not $nodeCmd) {
     Write-Info "Install it from https://nodejs.org (LTS version) and re-run this script."
     exit 1
 }
-$nodeVersion = (node --version).Trim()
-Write-Ok "Node.js found: $nodeVersion"
+Write-Ok "Node.js found: $((node --version).Trim())"
 
 # ---------------------------------------------------------------------------
 # 2. npm
@@ -50,8 +48,7 @@ if (-not $npmCmd) {
     Write-Info "Reinstall Node.js from https://nodejs.org, then re-run this script."
     exit 1
 }
-$npmVersion = (npm --version).Trim()
-Write-Ok "npm found: v$npmVersion"
+Write-Ok "npm found: v$((npm --version).Trim())"
 
 # ---------------------------------------------------------------------------
 # 3. Docker Desktop installed
@@ -65,47 +62,42 @@ if (-not $dockerCmd) {
     Write-Info "Then start Docker Desktop once (it needs to be running, not just installed) and re-run this script."
     exit 1
 }
-$dockerVersion = (docker --version).Trim()
-Write-Ok "Docker found: $dockerVersion"
+Write-Ok "Docker found: $((docker --version).Trim())"
 
 # ---------------------------------------------------------------------------
 # 4. Docker Desktop actually running (auto-launch it if not)
 # ---------------------------------------------------------------------------
 Write-Step "Checking Docker Desktop is running..."
-$dockerRunning = $false
-try {
-    docker info 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) { $dockerRunning = $true }
-} catch {
-    $dockerRunning = $false
+function Test-DockerReady {
+    try {
+        docker info 2>&1 | Out-Null
+        return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
+    }
 }
 
-if ($dockerRunning) {
+if (Test-DockerReady) {
     Write-Ok "Docker Desktop is already running."
 } else {
-    Write-Info "Docker Desktop is not running -- launching it..."
-    $dockerDesktopExe = "C:\Program Files\Docker\Docker\Docker Desktop.exe"
-    if (-not (Test-Path $dockerDesktopExe)) {
-        Write-Err "Docker is installed but Docker Desktop.exe was not found at the expected path ($dockerDesktopExe)."
-        Write-Info "Start Docker Desktop yourself (it can take 10-30s to finish starting up), then re-run this script."
+    Write-Info "Docker Desktop is not running -- looking for it..."
+    $dockerDesktopExe = Find-DockerDesktopExe
+    if (-not $dockerDesktopExe) {
+        Write-Err "Docker is installed but Docker Desktop.exe could not be found (checked the standard path and the registry)."
+        Write-Info "Start Docker Desktop yourself, then re-run this script."
         exit 1
     }
+
+    Write-Info "Launching $dockerDesktopExe ..."
     Start-Process $dockerDesktopExe | Out-Null
 
     # Cold start (including its WSL2 backend) can genuinely take 60s+ the
     # first time; 90s gives real headroom without hanging forever if
     # something's actually wrong.
-    $becameReady = Show-WaitProgress -Activity "Starting Docker Desktop" -MaxWaitSeconds 90 -PollSeconds 2 -CheckDone {
-        try {
-            docker info 2>&1 | Out-Null
-            $LASTEXITCODE -eq 0
-        } catch { $false }
-    }
-    if ($becameReady) {
-        Write-Ok "Docker Desktop is up."
-    } else {
-        Write-Err "Docker Desktop did not report ready within 90 seconds."
-        Write-Info "Open Docker Desktop and check for an error dialog, then re-run this script."
+    $becameReady = Wait-For -Label "Docker Desktop is up" -MaxWaitSeconds 90 -PollSeconds 3 -CheckDone { Test-DockerReady }
+    if (-not $becameReady) {
+        Write-Err "Docker Desktop did not become ready within 90 seconds."
+        Write-Info "Open Docker Desktop yourself and check for an error dialog, then re-run this script."
         exit 1
     }
 }
@@ -138,7 +130,11 @@ try {
     if (-not (Test-Path $nodeModules)) {
         Write-Info "node_modules missing -- installing dependencies (this may take a minute)..."
         if (Test-Path $lockFile) { npm ci } else { npm install }
-        if ($LASTEXITCODE -ne 0) { Write-Err "npm install failed. See output above."; exit 1 }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "npm install failed (exit code $LASTEXITCODE). See output above."
+            Write-Info "Common fixes: check your internet connection, or delete node_modules and package-lock.json and try again."
+            exit 1
+        }
         Write-Ok "Dependencies installed."
     } else {
         Write-Ok "node_modules already present. (Run 'npm install' yourself if package.json changed.)"
@@ -159,26 +155,24 @@ if (-not (Test-Path $composeFile)) {
 Push-Location $RepoRoot
 try {
     docker compose up -d
-    if ($LASTEXITCODE -ne 0) { Write-Err "docker compose up failed. See output above."; exit 1 }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "docker compose up failed. See output above."
+        Write-Info "If Docker Desktop just started, wait a few seconds and try running this script again."
+        exit 1
+    }
 } finally {
     Pop-Location
 }
 Write-Ok "Postgres container is up (or was already running)."
 
-Write-Info "Waiting for Postgres to accept connections..."
-$maxWaitSeconds = 30
-$waited = 0
-$ready = $false
-while ($waited -lt $maxWaitSeconds) {
+function Test-PostgresReady {
     docker exec rsvp-postgres-1 pg_isready -U postgres 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) { $ready = $true; break }
-    Start-Sleep -Seconds 2
-    $waited += 2
+    return $LASTEXITCODE -eq 0
 }
-if ($ready) {
-    Write-Ok "Postgres is ready."
-} else {
-    Write-Warn "Postgres did not report ready within $maxWaitSeconds seconds -- it may still be starting. Continuing anyway."
+$postgresReady = Wait-For -Label "Postgres is ready" -MaxWaitSeconds 30 -PollSeconds 2 -CheckDone { Test-PostgresReady }
+if (-not $postgresReady) {
+    Write-Warn "Postgres did not report ready within 30 seconds -- it may still be starting."
+    Write-Info "Continuing anyway. If the app can't reach the database, run 'docker compose logs postgres' to check."
 }
 
 # ---------------------------------------------------------------------------

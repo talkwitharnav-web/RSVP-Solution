@@ -8,34 +8,28 @@ warn() { printf "\033[33m    WARN: %s\033[0m\n" "$1"; }
 err()  { printf "\033[31m    ERROR: %s\033[0m\n" "$1"; }
 info() { printf "\033[90m    %s\033[0m\n" "$1"; }
 
-# Renders a real progress bar driven by a caller-supplied "are we done yet"
-# check function name -- not a fixed-time animation. Polls every
-# $3 (poll_seconds) up to $2 (max_wait_seconds), advancing toward 90% while
-# waiting and snapping to 100% the moment the check function returns success.
-# Usage: wait_progress "Label" max_wait_seconds poll_seconds check_fn
-wait_progress() {
+# Waits for a caller-supplied check function to succeed, printing one plain
+# status line every $poll seconds (e.g. "waiting... (10s)") instead of a fake
+# progress bar -- there's no way to know real percent-complete for something
+# like "has Docker Desktop finished booting", so we don't pretend to.
+# Usage: wait_for "label" max_wait_seconds poll_seconds check_fn
+wait_for() {
     local label="$1" max_wait="$2" poll="$3" check_fn="$4"
-    local waited=0 done=0 percent=0 bar_width=30 filled empty
+    local waited=0
 
     while [ "$waited" -lt "$max_wait" ]; do
         if "$check_fn"; then
-            done=1
-            break
+            ok "$label"
+            return 0
         fi
-        percent=$(( waited * 90 / max_wait ))
-        filled=$(( percent * bar_width / 100 ))
-        empty=$(( bar_width - filled ))
-        printf "\r    %s: [%s%s] %d%%" "$label" "$(printf '%*s' "$filled" '' | tr ' ' '#')" "$(printf '%*s' "$empty" '' | tr ' ' '-')" "$percent"
+        info "$label: still waiting... (${waited}s)"
         sleep "$poll"
         waited=$(( waited + poll ))
     done
 
-    if [ "$done" -eq 1 ]; then
-        filled=$bar_width
-        printf "\r    %s: [%s] 100%%\n" "$label" "$(printf '%*s' "$filled" '' | tr ' ' '#')"
+    if "$check_fn"; then
+        ok "$label"
         return 0
-    else
-        printf "\n"
-        return 1
     fi
+    return 1
 }

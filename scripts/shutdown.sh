@@ -26,24 +26,32 @@ printf "\033[35m=========================================\033[0m\n"
 # 1. Stop the dev server, if one is running on port 3001
 # ---------------------------------------------------------------------------
 step "Looking for a dev server on port 3001..."
-if command -v lsof >/dev/null 2>&1; then
-    pids=$(lsof -ti tcp:3001 2>/dev/null || true)
-elif command -v netstat >/dev/null 2>&1; then
-    # Git Bash on Windows: parse netstat output for the PID column.
-    pids=$(netstat -ano 2>/dev/null | grep ':3001 ' | grep LISTENING | awk '{print $NF}' | sort -u || true)
-else
-    pids=""
-fi
+
+# Uses PowerShell's Get-NetTCPConnection for the actual PID lookup -- it's a
+# structured object, unlike netstat's plain-text table, whose column layout
+# is not reliable enough to parse with a fixed awk column index.
+port_3001_pids() {
+    powershell -NoProfile -Command "
+        (Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess -Unique) -join ' '
+    " 2>/dev/null | tr -d '\r'
+}
+
+pids="$(port_3001_pids)"
 
 if [ -n "$pids" ]; then
     for pid in $pids; do
         info "Stopping process $pid listening on port 3001..."
-        if command -v taskkill >/dev/null 2>&1; then
-            taskkill //F //PID "$pid" >/dev/null 2>&1 && ok "Stopped." || warn "Could not stop process $pid -- it may have already exited."
-        else
-            kill -9 "$pid" 2>/dev/null && ok "Stopped." || warn "Could not stop process $pid -- it may have already exited."
-        fi
+        taskkill //F //PID "$pid" >/dev/null 2>&1
     done
+    sleep 1
+    remaining="$(port_3001_pids)"
+    if [ -z "$remaining" ]; then
+        ok "Stopped."
+    else
+        warn "Port 3001 still has a process listening ($remaining) after attempting to stop it."
+        info "You may need to close it manually (e.g. the terminal it was started in)."
+    fi
 else
     info "No dev server found listening on port 3001. (If you started it in a terminal with Ctrl+C available, just press Ctrl+C there instead.)"
 fi
@@ -58,7 +66,7 @@ else
     if (cd "$REPO_ROOT" && docker compose stop); then
         ok "Postgres container stopped. Your data is preserved for next time."
     else
-        warn "docker compose stop reported an error. It may already be stopped."
+        warn "docker compose stop reported an error. It may already be stopped, or Docker Desktop may already be closed."
     fi
 fi
 
@@ -69,22 +77,22 @@ step "Quitting Docker Desktop..."
 docker_desktop_running() {
     tasklist //FI "IMAGENAME eq Docker Desktop.exe" 2>/dev/null | grep -qi "Docker Desktop.exe"
 }
-if command -v tasklist >/dev/null 2>&1 && docker_desktop_running; then
+if ! command -v tasklist >/dev/null 2>&1; then
+    warn "tasklist not available -- cannot check/stop Docker Desktop from this shell. Skipping."
+elif docker_desktop_running; then
     taskkill //F //IM "Docker Desktop.exe" >/dev/null 2>&1 || true
     # Docker Desktop's backend runs as several helper processes
     # (com.docker.*.exe) that linger briefly after the main window closes.
     taskkill //F //IM "com.docker.backend.exe" >/dev/null 2>&1 || true
 
     docker_desktop_stopped() { ! docker_desktop_running; }
-    if wait_progress "Shutting down Docker Desktop" 30 1 docker_desktop_stopped; then
-        ok "Docker Desktop closed."
+    if wait_for "Docker Desktop closed" 30 2 docker_desktop_stopped; then
+        :
     else
         warn "Docker Desktop did not confirm closed within 30 seconds. It may still be shutting down in the background."
     fi
-elif command -v tasklist >/dev/null 2>&1; then
-    info "Docker Desktop does not appear to be running. Skipping."
 else
-    warn "tasklist not available -- cannot check/stop Docker Desktop from this shell. Skipping."
+    info "Docker Desktop does not appear to be running. Skipping."
 fi
 
 # ---------------------------------------------------------------------------
@@ -93,14 +101,10 @@ fi
 step "Shutting down WSL..."
 if command -v wsl.exe >/dev/null 2>&1 || command -v wsl >/dev/null 2>&1; then
     WSL_BIN="$(command -v wsl.exe || command -v wsl)"
-    "$WSL_BIN" --shutdown &
-    wsl_pid=$!
-    wsl_done() { ! kill -0 "$wsl_pid" 2>/dev/null; }
-    if wait_progress "Shutting down WSL" 30 1 wsl_done; then
-        wait "$wsl_pid" 2>/dev/null
+    if "$WSL_BIN" --shutdown; then
         ok "WSL shut down."
     else
-        warn "WSL shutdown did not confirm within 30 seconds. It may still be finishing in the background."
+        warn "wsl --shutdown reported an error. It may already be stopped."
     fi
 else
     info "wsl command not found on this machine. Skipping."

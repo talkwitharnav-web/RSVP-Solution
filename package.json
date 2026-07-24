@@ -3,14 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3001",
+    "dev": "node server.js",
     "build": "next build",
-    "start": "next start -p 3001",
+    "start": "node server.js",
     "lint": "eslint",
-    "start:all": "bash scripts/startup.sh",
-    "stop:all": "bash scripts/shutdown.sh",
+    "start:all": "\"%LOCALAPPDATA%\\Programs\\Git\\bin\\bash.exe\" scripts/startup.sh",
+    "stop:all": "\"%LOCALAPPDATA%\\Programs\\Git\\bin\\bash.exe\" scripts/shutdown.sh",
     "db:up": "docker compose up -d",
-    "db:down": "docker compose stop"
+    "db:down": "\"%LOCALAPPDATA%\\Programs\\Git\\bin\\bash.exe\" scripts/shutdown.sh"
   },
   "dependencies": {
     "lucide-react": "^1.26.0",
@@ -19,7 +19,8 @@
     "pg": "^8.22.0",
     "qrcode": "^1.5.4",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -28,6 +29,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/ws": "^8.18.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
     "tailwindcss": "^4",

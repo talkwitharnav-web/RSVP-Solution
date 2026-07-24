@@ -4,6 +4,7 @@ Narrative decisions and working style for this RSVP project. Read `SYSTEM_MEMORY
 
 ## Critical — Read First
 
+- **Never close Docker Desktop or the app's Node/dev-server process as "cleanup" after testing.** Restarting them (stop + start again) is fine when actually needed, but leaving them open at the end of a turn is the default — only the user decides when Docker/Node actually get closed for the session. Stated explicitly 2026-07-24 after a testing session ended with both closed as tidy-up, which the user did not want: "why the hell did you close docker and node? keep those open. never close them." If a test genuinely requires stopping a server (e.g. to test the shutdown script itself, or to free a port for a different test), that's fine — just don't default to closing things down "to leave a clean state" once verification is done.
 - **Never blanket-kill Chrome.** The user actively uses their own Chrome browser alongside this work. For any headless/scripted browser check (screenshots, visual verification):
   1. Launch a separate headless instance with a unique `--user-data-dir` and `--remote-debugging-port=9222`, pointed at `about:blank` (not the target URL directly):
      - PowerShell: `& "C:\Program Files\Google\Chrome\Application\chrome.exe" --headless=new --remote-debugging-port=9222 --user-data-dir="$env:TEMP\chrome-headless-test-$(Get-Random)" --no-first-run about:blank`
