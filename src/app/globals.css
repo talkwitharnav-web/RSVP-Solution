@@ -95,6 +95,16 @@ body {
   font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
 }
 
+/* Tailwind v4's Preflight resets button { cursor: default } -- override
+   back to the normal pointer/"clicky" cursor for any actual clickable
+   control, matching standard web conventions (a button/link should always
+   show the hand cursor on hover). Disabled buttons keep their own
+   cursor-not-allowed, set per-component (see Button.tsx). */
+button:not(:disabled),
+[role="button"] {
+  cursor: pointer;
+}
+
 h1,
 h2,
 h3,
