@@ -63,6 +63,12 @@ Current technical truth for the RSVP app. Narrative history and working-style no
 
 Types mirrored in TypeScript at `src/lib/types.ts` (`EventRecord`, `RsvpRecord`, `EventKind`, `RsvpQuestion`).
 
+## WebSockets
+
+- `src/lib/useWebSocket.ts` — reusable client hook (connect to `/ws`, JSON message parsing, reconnect with exponential backoff capped at 15s, returns `{status, messagesByType}` keyed by each message's own `type`). Not hardcoded to health data — a future live feature (e.g. a host dashboard watching RSVP counts) can subscribe to its own message type over the same connection instead of opening a second socket.
+- `HealthPin` (`src/components/ui/HealthPin.tsx`) is the only current consumer: shows a live status dot fed by the server's heartbeat push (real "0s ago" ticking, confirmed live) — no client-side polling anywhere. Much simpler than the reference project's own `HealthPin` (no DB latency/pool-saturation stats — RSVP has no `/api/health`-style endpoint yet; that's future work once there's a real reason to surface it).
+- No other real-time data flows over the socket yet — explicitly scoped that way (user confirmed "minimal health channel" over "wire it to nothing yet" when asked).
+
 ## UI and Design Rules
 
 - Theme is implemented per `theme.md` (full research/rationale/token table lives there). Fonts: Bricolage Grotesque (`--font-display`, headings only) + Plus Jakarta Sans (`--font-body`, everything else), loaded via `next/font/google` in `layout.tsx`. Colors: full light/dark CSS variable set in `globals.css` — `--color-bg-base`/`-bg-raised`, `--color-text-primary`/`-muted`, `--color-accent-coral`/`-coral-text`/`-on-coral`, `--color-accent-sage`, `--color-accent-lavender`, `--color-border`, `--color-danger`, plus a structural layer added 2026-07-24: `--radius-sm`/`-md`/`-full`, `--color-surface-0`/`-1`/`-2`, `--color-border-strong`, `--color-success` (radius values ported directly from the reference project since they're theme-neutral; surface/border-strong/success derived from our own palette). Theme switches via a manual `data-theme` attribute on `<html>` (set by `ThemeToggle`, applied pre-hydration by an inline script in `layout.tsx` — same mechanism as the reference project) with `prefers-color-scheme` as the fallback when no manual choice has been made yet.
@@ -75,31 +81,32 @@ Types mirrored in TypeScript at `src/lib/types.ts` (`EventRecord`, `RsvpRecord`,
 
 ## Current State / What's Built
 
-As of 2026-07-23:
+As of 2026-07-24:
 
-- **`/` is the admin gateway page** (`src/app/page.tsx`, `AdminGatewayPage`) — sidebar (RSVP wordmark, RSVP Sender/RSVP Receiver/Access DB nav links, Log Out), header with a combined Healthy-status + theme-toggle pill (no divider line under it). All three nav links and both header buttons are visual-only duds — no click behavior wired up yet. Verified visually via headless Chrome (see Chrome-automation rule in `CLAUDE.md`), not just HTTP status — icon alignment (wordmark icon vs. nav icons, all sized `h-4 w-4` sharing the same `px-3` left inset) was specifically checked and fixed after an initial misalignment.
-- `/admin` redirects (307) to `/`.
-- Both create flows (`/create/link`, `/create/template`) are functional client forms posting to `POST /api/events`, redirecting to `/e/[slug]` on success — currently orphaned (no page links to them since `/` changed).
-- `/e/[slug]` renders correctly for both event kinds; the hosted RSVP form (`RsvpForm.tsx`) posts to `POST /api/events/[slug]/rsvps` and shows a plain confirmation message on success.
+- **`/` is the admin gateway page** (`src/app/page.tsx`, `AdminGatewayPage`), fully overhauled from the 2026-07-23 static version by exploring the reference project's real source directly (not just its docs). Sidebar nav links (Sender/Receiver/Access DB) still point at empty stub pages — genuinely dud in the sense of "no content behind them," but the surrounding chrome (Settings pill, HealthPin, Accessibility menu, theme toggle, UI size toggle) is real, working functionality, not placeholders.
+- `/admin` redirects (307) to `/`. `/admin/sender`, `/admin/receiver`, `/admin/db` exist as empty stub pages.
+- Both create flows (`/create/link`, `/create/template`) still functional but orphaned (no page links to them).
+- `/e/[slug]` and the hosted RSVP form still working as of the 2026-07-23 DB-backed verification.
 - `npx tsc --noEmit` and `npx eslint .` both pass clean as of the latest change.
-- Full DB-backed loop verified live against real Postgres (Docker) on 2026-07-23: created a `hosted_template` event via `POST /api/events`, loaded `/e/[slug]` (200), submitted an RSVP via `POST /api/events/[slug]/rsvps`, confirmed both rows landed correctly via `psql` (including `answers` JSONB round-tripping). Test rows were deleted afterward.
-- `theme.md` written 2026-07-23: full research-backed color/typography decision record (not just vibes) — see that file for the WCAG-contrast-verified token table and rejected directions.
+- `theme.md` (2026-07-23): research-backed color/typography decision record — see that file for the WCAG-contrast-verified token table.
+- **Sidebar layout fixed 2026-07-24**: Access DB originally sat directly adjacent to Log Out (separated only by a thin divider), which the user flagged as an overshoot-misclick risk ("what if someone goes to click access db but they overshoot and click log out?"). Fixed to match the reference project's actual grouping — Access DB joined the Sender/Receiver block, Log Out pushed to the bottom via a flex spacer with its own top border, real vertical distance between them.
 
 ## Explicitly NOT built yet
 
-- Sidebar nav links (`/admin/sender`, `/admin/receiver`, `/admin/db`) and header buttons (Log Out, theme toggle) on `/` are all visual duds — no routes exist at those paths yet, no click handlers.
+- No actual content behind `/admin/sender`, `/admin/receiver`, `/admin/db` — empty stub pages.
+- Log Out button has no click handler (no auth system exists to log out of yet).
 - No host-facing dashboard/guest list view (a host currently has no way to see who RSVP'd — only the DB holds that).
 - No auth of any kind — anyone with an event's slug can view it; anyone can submit an RSVP. No spam/rate-limiting.
 - No visual template customization (colors, images, layout) — template events all render through one fixed layout.
 - No QR code generation on the event page yet, despite the package being installed.
-- No manual theme toggle — dark/light currently follows `prefers-color-scheme` only.
+- No `/api/health`-style endpoint — `HealthPin` only reports WS connection status, not DB latency/pool stats.
 - No tests.
 - No production deployment/hosting decision made.
 
 ## Next Likely Steps (not started)
 
-- Build out real pages at `/admin/sender`, `/admin/receiver`, `/admin/db` to replace the current dud links.
-- Decide where `/create/link` and `/create/template` should be reachable from now that `/` is the admin gateway (see "Open question" under Routes above) — likely folded into the future RSVP Sender flow.
-- Add a minimal host view (e.g. `/e/[slug]/manage` or similar) to see submitted RSVPs — needed before this is genuinely useful to a real host, even at proof-of-concept level.
+- Build out real pages at `/admin/sender`, `/admin/receiver`, `/admin/db`.
+- Decide where `/create/link` and `/create/template` should be reachable from now that `/` is the admin gateway — likely folded into the future RSVP Sender flow.
+- Add a minimal host view (e.g. `/e/[slug]/manage` or similar) to see submitted RSVPs.
 - Wire up `qrcode` on the event page for easy sharing.
-- Wire up the theme-toggle button (currently a dud) to a real manual override, same shape as the reference project's toggle.
+- If a real host dashboard is ever built with live-updating data, it should subscribe to its own message `type` over the existing `useWebSocket` connection rather than opening a second socket.
