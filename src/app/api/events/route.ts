@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { initDb, pool } from "@/lib/db";
 import { generateSlug } from "@/lib/slug";
+import { broadcastDbChanged } from "@/lib/ws-broadcast";
 import type { RsvpQuestion } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
@@ -38,5 +39,6 @@ export async function POST(req: NextRequest) {
     ],
   );
 
+  broadcastDbChanged("events");
   return NextResponse.json({ slug: result.rows[0].slug }, { status: 201 });
 }

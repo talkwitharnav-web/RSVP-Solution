@@ -23,6 +23,13 @@ function broadcast(message) {
   }
 }
 
+// Exposed on globalThis so API route handlers (running in this same Node
+// process, just through Next's request handler rather than server.js's own
+// code) can push a live update without needing their own WS client -- e.g.
+// broadcasting "db-changed" from POST /api/sender/register the instant a
+// user row is inserted, so /admin/db can refresh without polling.
+globalThis.__rsvpBroadcast = broadcast;
+
 app.prepare().then(() => {
   const server = createServer((req, res) => {
     handle(req, res);

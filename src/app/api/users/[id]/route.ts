@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { initDb, pool } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
+import { broadcastDbChanged } from "@/lib/ws-broadcast";
 
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+
   await initDb();
   const { id } = await params;
   const body = await req.json().catch(() => ({}));
@@ -23,6 +28,7 @@ export async function PUT(
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
+  broadcastDbChanged("users");
   return NextResponse.json(result.rows[0]);
 }
 
@@ -30,6 +36,9 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+
   await initDb();
   const { id } = await params;
 
@@ -38,5 +47,6 @@ export async function DELETE(
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
+  broadcastDbChanged("users");
   return NextResponse.json({ message: "User deleted successfully" });
 }

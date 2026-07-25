@@ -2,10 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { initDb, pool } from "@/lib/db";
 import { generateSlug } from "@/lib/slug";
+import { requireAdmin } from "@/lib/auth";
+import { broadcastDbChanged } from "@/lib/ws-broadcast";
 
 const SALT_ROUNDS = 10;
 
 export async function GET() {
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+
   await initDb();
 
   const [usersResult, eventsResult] = await Promise.all([
@@ -20,6 +25,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+
   await initDb();
   const body = await req.json().catch(() => ({}));
 
@@ -86,10 +94,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  broadcastDbChanged("users");
+  broadcastDbChanged("events");
   return NextResponse.json({ message: "Seeded 3 users and 3 sample events!" });
 }
 
 export async function DELETE(req: NextRequest) {
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+
   const body = await req.json().catch(() => ({}));
   if (body.confirmation !== "PURGE DATABASE") {
     return NextResponse.json({ error: "Type PURGE DATABASE to confirm" }, { status: 400 });
@@ -100,5 +113,7 @@ export async function DELETE(req: NextRequest) {
   await pool.query("DELETE FROM events");
   await pool.query("DELETE FROM users");
 
+  broadcastDbChanged("users");
+  broadcastDbChanged("events");
   return NextResponse.json({ message: "Database purged successfully" });
 }

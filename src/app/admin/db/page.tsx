@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Database, Trash2, Key, ShieldAlert, Search, Pencil } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -13,6 +14,7 @@ import { HealthPin } from "@/components/ui/HealthPin";
 import { CopyableValue } from "@/components/ui/CopyableValue";
 import { StrengthMeter } from "@/components/ui/StrengthMeter";
 import { scorePasswordStrength } from "@/lib/credential-strength";
+import { useWebSocket } from "@/lib/useWebSocket";
 import type { UserRecord, EventRecord } from "@/lib/types";
 
 interface ConfirmState {
@@ -40,10 +42,13 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 function AdminDbContent() {
+  const router = useRouter();
   const showToast = useToast();
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSessionLoading, setIsSessionLoading] = useState(true);
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [userSearch, setUserSearch] = useState("");
   const [eventSearch, setEventSearch] = useState("");
   const [confirmState, setConfirmState] = useState<ConfirmState>(EMPTY_CONFIRM);
@@ -61,12 +66,46 @@ function AdminDbContent() {
   }, []);
 
   useEffect(() => {
+    fetchJson<{ authenticated: boolean; admin: boolean }>("/api/session")
+      .then((session) => {
+        if (session.admin) {
+          setIsAdminAuthenticated(true);
+        } else {
+          router.push("/");
+        }
+      })
+      .catch(() => router.push("/"))
+      .finally(() => setIsSessionLoading(false));
+  }, [router]);
+
+  useEffect(() => {
+    if (!isAdminAuthenticated) return;
     // Initial data fetch on mount -- unavoidable without diverging from SSR,
     // same documented precedent as HealthPin/AccessibilityMenu elsewhere in
     // this project (see SYSTEM_MEMORY.md).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     reload().finally(() => setIsLoading(false));
-  }, [reload]);
+  }, [reload, isAdminAuthenticated]);
+
+  // Live updates: any API route that inserts/updates/deletes a users or
+  // events row calls broadcastDbChanged() (see lib/ws-broadcast.ts), which
+  // pushes a "db-changed" message over the same /ws connection HealthPin's
+  // listener count already tracks. A user signing up on another tab/device
+  // shows up here within the same tick, no polling or manual refresh.
+  const { messagesByType } = useWebSocket();
+  const dbChangedMessage = messagesByType["db-changed"];
+  useEffect(() => {
+    if (!isAdminAuthenticated || !dbChangedMessage) return;
+    // Reacting to an external system's own update (a WS push from another
+    // client's mutation), not synchronizing from React's own state -- same
+    // documented exception as HealthPin/AccessibilityMenu elsewhere in this
+    // project (see SYSTEM_MEMORY.md).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbChangedMessage, isAdminAuthenticated]);
+
+  if (isSessionLoading || !isAdminAuthenticated) return null;
 
   const closeConfirm = () => {
     setConfirmState(EMPTY_CONFIRM);

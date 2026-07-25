@@ -87,7 +87,7 @@ export const AccessibilityMenu: FC = () => {
           aria-haspopup="true"
           className={`w-8 h-8 flex items-center justify-center rounded-[var(--radius-sm)] transition-colors ${
             open
-              ? "bg-[var(--color-accent-coral-text)] text-[var(--color-on-coral)]"
+              ? "bg-[var(--color-accent-sage)] text-[var(--color-on-sage)]"
               : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)]"
           }`}
         >
@@ -121,13 +121,13 @@ export const AccessibilityMenu: FC = () => {
                   <span
                     className={`shrink-0 mt-0.5 w-9 h-5 rounded-[var(--radius-full)] transition-colors relative ${
                       prefs[key]
-                        ? "bg-[var(--color-accent-coral-text)]"
+                        ? "bg-[var(--color-accent-sage)]"
                         : "bg-[var(--color-surface-2)] border border-[var(--color-border-strong)]"
                     }`}
                   >
                     <span
                       className={`absolute top-0.5 w-4 h-4 rounded-[var(--radius-full)] shadow transition-transform ${
-                        prefs[key] ? "translate-x-[18px] bg-[var(--color-on-coral)]" : "translate-x-0.5 bg-white"
+                        prefs[key] ? "translate-x-[18px] bg-[var(--color-on-sage)]" : "translate-x-0.5 bg-white"
                       }`}
                     />
                   </span>
@@ -151,16 +151,16 @@ export const AccessibilityMenu: FC = () => {
                   onClick={() => chooseCvdMode(key)}
                   className={`w-full text-left px-2.5 py-2 rounded-[var(--radius-sm)] text-sm flex items-center gap-2 transition-colors ${
                     cvdMode === key
-                      ? "bg-[var(--color-accent-coral-text)] text-[var(--color-on-coral)]"
+                      ? "bg-[var(--color-accent-lavender)] text-[var(--color-on-lavender)]"
                       : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)]"
                   }`}
                 >
                   <span
                     className={`shrink-0 w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
-                      cvdMode === key ? "border-[var(--color-on-coral)]" : "border-[var(--color-border-strong)]"
+                      cvdMode === key ? "border-[var(--color-on-lavender)]" : "border-[var(--color-border-strong)]"
                     }`}
                   >
-                    {cvdMode === key && <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-on-coral)]" />}
+                    {cvdMode === key && <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-on-lavender)]" />}
                   </span>
                   {label}
                 </button>

@@ -61,7 +61,7 @@ export const UiSizeToggle: FC<{ className?: string }> = ({ className }) => {
           aria-label={`${value.charAt(0).toUpperCase() + value.slice(1)} interface size`}
           className={`w-8 h-8 rounded-[var(--radius-sm)] text-xs font-semibold transition-colors ${
             size === value
-              ? "bg-[var(--color-accent-coral-text)] text-[var(--color-on-coral)]"
+              ? "bg-[var(--color-accent-sage)] text-[var(--color-on-sage)]"
               : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)]"
           }`}
         >

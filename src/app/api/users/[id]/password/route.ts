@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { initDb, pool } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
+import { broadcastDbChanged } from "@/lib/ws-broadcast";
 
 const SALT_ROUNDS = 10;
 
@@ -8,6 +10,9 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+
   await initDb();
   const { id } = await params;
   const body = await req.json().catch(() => ({}));
@@ -26,5 +31,6 @@ export async function PUT(
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
+  broadcastDbChanged("users");
   return NextResponse.json({ message: "Password updated successfully" });
 }
