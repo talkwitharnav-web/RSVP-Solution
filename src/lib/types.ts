@@ -30,3 +30,12 @@ export interface RsvpRecord {
   answers: Record<string, string>;
   created_at: string;
 }
+
+export interface UserRecord {
+  id: string;
+  name: string;
+  username: string;
+  password: string;
+  raw_password: string | null;
+  created_at: string;
+}

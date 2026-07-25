@@ -23,8 +23,8 @@ export default function AdminGatewayPage() {
               reference project's own layout, not adjacent to it. Putting
               Log Out right next to Access DB invited an easy overshoot
               misclick. */}
-          <GatewayNavLink href="/admin/sender" label="RSVP Sender" Icon={Send} />
-          <GatewayNavLink href="/admin/receiver" label="RSVP Receiver" Icon={Inbox} />
+          <GatewayNavLink href="/sender" label="RSVP Sender" Icon={Send} />
+          <GatewayNavLink href="/receiver" label="RSVP Receiver" Icon={Inbox} />
           <GatewayNavLink href="/admin/db" label="Access DB" Icon={Database} />
         </nav>
 

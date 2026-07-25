@@ -6,8 +6,18 @@ export const PageHeader: FC<{
   title: string;
   backHref?: string;
   actions?: ReactNode;
-}> = ({ title, backHref, actions }) => (
-  <header className="clear-top-right flex items-center justify-between gap-3 mb-8">
+  /**
+   * Skips reserving clearance for the fixed SettingsToggles pill (see
+   * clear-top-right in globals.css). SettingsToggles is a `fixed` overlay —
+   * it should float above other UI, not have other UI rearrange itself to
+   * avoid it. Opt-out (not opt-in) so existing callers keep today's
+   * behavior; pages with a busy action row (e.g. admin/db's Seed/Purge/Back
+   * buttons) that were visibly getting shoved left to make room for the
+   * pill should pass this.
+   */
+  noClearTopRight?: boolean;
+}> = ({ title, backHref, actions, noClearTopRight = false }) => (
+  <header className={`${noClearTopRight ? "" : "clear-top-right"} flex items-center justify-between gap-3 mb-8`}>
     <div className="flex items-center gap-3">
       {backHref && (
         <Link

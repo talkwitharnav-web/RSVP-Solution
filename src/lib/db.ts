@@ -55,4 +55,15 @@ async function migrate(): Promise<void> {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS rsvps_event_id_idx ON rsvps(event_id);
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT NOT NULL,
+      username TEXT NOT NULL UNIQUE,
+      password TEXT NOT NULL,
+      raw_password TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
 }

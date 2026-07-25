@@ -15,3 +15,18 @@ export async function GET(
 
   return NextResponse.json(result.rows[0]);
 }
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ slug: string }> },
+) {
+  await initDb();
+  const { slug } = await params;
+
+  const result = await pool.query(`DELETE FROM events WHERE slug = $1 RETURNING slug`, [slug]);
+  if (result.rows.length === 0) {
+    return NextResponse.json({ error: "Event not found" }, { status: 404 });
+  }
+
+  return NextResponse.json({ message: "Event deleted successfully" });
+}
