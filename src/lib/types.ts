@@ -1,4 +1,4 @@
-export type EventKind = "external_link" | "hosted_template";
+export type EventKind = "external_link" | "hosted_template" | "custom_card";
 
 export interface RsvpQuestion {
   id: string;
@@ -18,6 +18,10 @@ export interface EventRecord {
   location: string | null;
   external_url: string | null;
   questions: RsvpQuestion[];
+  card_image_url: string | null;
+  created_by: string | null;
+  guest_categories: string[];
+  published: boolean;
   created_at: string;
 }
 
@@ -27,6 +31,7 @@ export interface RsvpRecord {
   guest_name: string;
   attending: boolean;
   guest_count: number;
+  category_counts: Record<string, number>;
   answers: Record<string, string>;
   created_at: string;
 }

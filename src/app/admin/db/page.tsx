@@ -536,7 +536,7 @@ function AdminDbContent() {
                           </td>
                           <td className="py-3 px-4 text-[var(--color-text-muted)] font-mono text-xs">
                             {typeof window !== "undefined" && (
-                              <CopyableValue value={`${window.location.origin}/e/${e.slug}`} label="RSVP link" />
+                              <CopyableValue value={`${window.location.origin}/receiver/${e.slug}`} label="RSVP link" />
                             )}
                           </td>
                           <td className="py-3 px-4 text-[var(--color-text-primary)] hidden md:table-cell">

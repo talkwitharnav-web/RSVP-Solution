@@ -2,7 +2,7 @@
 
 import { useState, useEffect, FormEvent } from "react";
 import Link from "next/link";
-import { MailOpen, Send, Inbox, Database, LogOut, Lock, type LucideIcon } from "lucide-react";
+import { MailOpen, Send, Database, LogOut, Lock, type LucideIcon } from "lucide-react";
 import { SettingsToggles } from "@/components/ui/SettingsToggles";
 import { HealthPin } from "@/components/ui/HealthPin";
 import { AuthCard } from "@/components/ui/AuthCard";
@@ -73,16 +73,16 @@ export default function AdminGatewayPage() {
         </div>
 
         <nav className="flex flex-col gap-1">
-          {/* Sender/Receiver are the app's two audiences (a host sending an
-              RSVP, a guest receiving one), not admin-only tools. Access DB
-              IS an admin tool, but sits in this same top group -- Log Out
-              is the one item that needs real separation, since it's
-              destructive-ish and sits right below Access DB in the
-              reference project's own layout, not adjacent to it. Putting
-              Log Out right next to Access DB invited an easy overshoot
+          {/* RSVP Receiver isn't a real gateway destination -- there's no
+              single "receiver home", each guest link is its own
+              /receiver/[slug] handed out by a sender after they publish an
+              invitation (see EventEditor's Publish button). Sender is still
+              a real top-level audience link; Access DB is an admin tool but
+              sits in this same top group -- Log Out is the one item that
+              needs real separation, since it's destructive-ish. Putting Log
+              Out right next to Access DB invited an easy overshoot
               misclick. */}
           <GatewayNavLink href="/sender" label="RSVP Sender" Icon={Send} iconColorVar="--color-accent-coral-text" />
-          <GatewayNavLink href="/receiver" label="RSVP Receiver" Icon={Inbox} iconColorVar="--color-accent-sage" />
           {hasAdminSession && (
             <GatewayNavLink href="/admin/db" label="Access DB" Icon={Database} iconColorVar="--color-accent-lavender" />
           )}

@@ -71,16 +71,25 @@ export default function SenderSignupPage() {
       onSubmit={handleRegister}
       error={error}
       footer={
-        <p className="text-sm text-[var(--color-text-muted)]">
-          Already have an account?{" "}
+        <div className="space-y-3">
+          <p className="text-sm text-[var(--color-text-muted)]">
+            Already have an account?{" "}
+            <button
+              type="button"
+              onClick={() => router.push("/sender/login")}
+              className="font-semibold text-[var(--color-accent-coral-text)] hover:underline"
+            >
+              Log in
+            </button>
+          </p>
           <button
             type="button"
-            onClick={() => router.push("/sender/login")}
-            className="font-semibold text-[var(--color-accent-coral-text)] hover:underline"
+            onClick={() => router.push("/sender/landing")}
+            className="text-xs text-[var(--color-text-muted)] hover:underline"
           >
-            Log in
+            &larr; Back to overview
           </button>
-        </p>
+        </div>
       }
     >
       <div>

@@ -28,7 +28,7 @@ async function migrate(): Promise<void> {
     CREATE TABLE IF NOT EXISTS events (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       slug TEXT NOT NULL UNIQUE,
-      kind TEXT NOT NULL CHECK (kind IN ('external_link', 'hosted_template')),
+      kind TEXT NOT NULL CHECK (kind IN ('external_link', 'hosted_template', 'custom_card')),
       title TEXT NOT NULL,
       host_name TEXT,
       description TEXT,
@@ -36,8 +36,25 @@ async function migrate(): Promise<void> {
       location TEXT,
       external_url TEXT,
       questions JSONB NOT NULL DEFAULT '[]',
+      card_image_url TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+  `);
+
+  // card_image_url/kind's custom_card option were added after the table
+  // originally shipped -- ALTERs so anyone with an existing dev DB migrates
+  // forward instead of needing a manual DROP TABLE.
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS card_image_url TEXT;`);
+  // DROP then ADD in one statement (not two separate pool.query calls) so
+  // they run in the same round trip -- Postgres has no
+  // "ADD CONSTRAINT IF NOT EXISTS", and running the drop/add as two
+  // separate queries left a window where a second process's migrate() call
+  // (e.g. a dev-server restart racing an in-flight request) could see the
+  // constraint gone between the DROP and the ADD, then fail with
+  // "constraint already exists" when both tried to ADD it back.
+  await pool.query(`
+    ALTER TABLE events DROP CONSTRAINT IF EXISTS events_kind_check;
+    ALTER TABLE events ADD CONSTRAINT events_kind_check CHECK (kind IN ('external_link', 'hosted_template', 'custom_card'));
   `);
 
   await pool.query(`
@@ -56,6 +73,24 @@ async function migrate(): Promise<void> {
     CREATE INDEX IF NOT EXISTS rsvps_event_id_idx ON rsvps(event_id);
   `);
 
+  // guest_categories: sender-defined category labels for a "how many of each"
+  // breakdown (e.g. ["Adults", "Kids"], or any custom comma-separated list --
+  // see src/lib/guest-categories.ts). Defaults to the standard two so every
+  // existing/new event has a sane breakdown without the sender configuring
+  // anything. category_counts on rsvps is the per-submission breakdown keyed
+  // by those same category labels; guest_count stays a stored derived sum
+  // (backward-compatible with anything already reading it) rather than being
+  // replaced outright.
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS guest_categories JSONB NOT NULL DEFAULT '["Adults", "Kids"]';`);
+  await pool.query(`ALTER TABLE rsvps ADD COLUMN IF NOT EXISTS category_counts JSONB NOT NULL DEFAULT '{}';`);
+
+  // published gates /receiver/[slug] -- a draft invitation isn't guessable
+  // by a guest before the sender explicitly hits Publish. The slug itself
+  // never changes across publish/re-edit/resend, so an already-shared link
+  // keeps working through any number of later edits (only the content
+  // changes) -- see EventEditor's Publish button and /receiver/[slug].
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT false;`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -66,4 +101,9 @@ async function migrate(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+
+  // created_by needs the users table to exist first, so it's added here
+  // rather than in events' own CREATE TABLE block above.
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id) ON DELETE SET NULL;`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS events_created_by_idx ON events(created_by);`);
 }

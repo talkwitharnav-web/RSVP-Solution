@@ -23,7 +23,7 @@ export default function CreateLinkPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Something went wrong");
-      router.push(`/e/${data.slug}`);
+      router.push(`/e/${data.slug}?mode=edit`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {

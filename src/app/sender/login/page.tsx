@@ -76,16 +76,25 @@ export default function SenderLoginPage() {
       onSubmit={handleLogin}
       error={error}
       footer={
-        <p className="text-sm text-[var(--color-text-muted)]">
-          New here?{" "}
+        <div className="space-y-3">
+          <p className="text-sm text-[var(--color-text-muted)]">
+            New here?{" "}
+            <button
+              type="button"
+              onClick={() => router.push("/sender/signup")}
+              className="font-semibold text-[var(--color-accent-coral-text)] hover:underline"
+            >
+              Create an account
+            </button>
+          </p>
           <button
             type="button"
-            onClick={() => router.push("/sender/signup")}
-            className="font-semibold text-[var(--color-accent-coral-text)] hover:underline"
+            onClick={() => router.push("/sender/landing")}
+            className="text-xs text-[var(--color-text-muted)] hover:underline"
           >
-            Create an account
+            &larr; Back to overview
           </button>
-        </p>
+        </div>
       }
     >
       <div>

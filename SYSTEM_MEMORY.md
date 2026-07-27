@@ -6,7 +6,7 @@ Current technical truth for the RSVP app. Narrative history and working-style no
 
 - Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS v4 — scaffolded via `create-next-app` on 2026-07-23.
 - PostgreSQL via `pg` (no ORM), connection via `DATABASE_URL` env var.
-- `nanoid` for short public slugs, `qrcode` installed but not yet wired into any page, `lucide-react` for all icons (never emoji — see UI and Design Rules), `ws` for the WebSocket server/client, `bcryptjs` for hashing user passwords (pure-JS, chosen over native `bcrypt` to avoid Windows build friction).
+- `nanoid` for short public slugs, `qrcode` installed but not yet wired into any page, `lucide-react` for all icons (never emoji — see UI and Design Rules), `ws` for the WebSocket server/client, `bcryptjs` for hashing user passwords (pure-JS, chosen over native `bcrypt` to avoid Windows build friction), `heic2any` (client-only, dynamic `import()`) to transcode HEIC/HEIF photos to JPEG in-browser before upload, `recharts` for the Statistics pie chart.
 - Dev server: `npm run dev` runs `node server.js`, pinned to **port 3001**, not the Next.js default 3000 — the user's other project (restaurant order tracker) already runs on 3000, and both projects may run side by side. `npm run start` also runs `server.js`. All scripts (`scripts/*.sh`, `scripts/*.ps1`) and docs reference 3001.
 - **Custom `server.js`** (CJS, project root) wraps Next and hosts a raw `/ws` WebSocket endpoint — required because plain `next dev`/`next start` can't host a raw WS upgrade. Same-origin check on the WS upgrade (Origin header must match Host); no LAN/non-browser exception yet (unlike the reference project, RSVP has no non-browser client). Broadcasts a `{type: "heartbeat", status: "healthy", at: <ms>}` message every 10s to all connected clients (`globalThis.__rsvpWsClients`), plus one immediate heartbeat on connect. Also exposes its own `broadcast()` function on `globalThis.__rsvpBroadcast` (added 2026-07-24) so API route handlers — which run in the same Node process but through Next's request handler, not `server.js`'s own code — can push a live WS message without holding a WebSocket client themselves; see "Auth" and "WebSockets" sections below. `eslint.config.mjs` has a scoped override allowing `require()` in `server.js` only (it's a plain CJS entrypoint, not bundled by Next).
   - **Gotcha**: `server.js` only runs its top-level code once at process boot — it is not hot-reloaded by Next's dev-mode HMR. Editing `server.js` (e.g. adding the `__rsvpBroadcast` assignment) requires a full dev-server restart before API routes can see the new `globalThis` value; a plain file save is not enough. Confirmed via a `hasBroadcastFn: false` → restart → `hasBroadcastFn: true` check on 2026-07-24.
@@ -32,27 +32,31 @@ Current technical truth for the RSVP app. Narrative history and working-style no
 
 | Route | Purpose |
 |---|---|
-| `/` | **Admin gateway page** (`AdminGatewayPage`). Sidebar: RSVP wordmark, then one grouped nav block (RSVP Sender / RSVP Receiver / Access DB — Access DB only rendered once an admin session exists), then Log Out alone at the bottom separated by a spacer + top border (only rendered when logged in). Top-right: the real collapsible `SettingsToggles` pill (UI size, Accessibility menu, theme toggle, live `HealthPin`, `HealthPin` itself only rendered when logged in). When logged out, the main content area shows an inline `AuthCard` admin login form instead of a nav destination — see "Auth" below. This is the canonical root — not the old create-flow landing page. |
+| `/` | **Admin gateway page** (`AdminGatewayPage`). Sidebar: RSVP wordmark, then one grouped nav block (RSVP Sender / Access DB — Access DB only rendered once an admin session exists), then Log Out alone at the bottom separated by a spacer + top border (only rendered when logged in). **RSVP Receiver was removed from this nav 2026-07** — it isn't a real gateway destination; there's no single "receiver home" to link to, only per-invitation `/receiver/[slug]` links a sender hands out after publishing (see below). Top-right: the real collapsible `SettingsToggles` pill (UI size, Accessibility menu, theme toggle, live `HealthPin`, `HealthPin` itself only rendered when logged in). When logged out, the main content area shows an inline `AuthCard` admin login form instead of a nav destination — see "Auth" below. |
 | `/admin` | Redirects (307) to `/`. |
-| `/sender` | Gated stub page — redirects to `/sender/login` if no sender session, otherwise shows a minimal "Signed in as X" placeholder (the real dashboard isn't built yet). |
-| `/sender/login` | Sender login form (username/password/Remember Me). If zero `users` rows exist in the DB, redirects straight to `/sender/signup` before rendering — see "Auth" below. If a valid sender session already exists, redirects to `/sender`. |
-| `/sender/signup` | Sender self-serve signup form (name/username/password with a live `StrengthMeter`/Remember Me). Auto-logs-in on success. |
-| `/receiver` | Empty stub page (`return null`) — standalone top-level route, **not** under `/admin/*`. |
-| `/admin/db` | **Real page**, gated behind a valid admin session (built 2026-07-24, gated 2026-07-24) — see "Access DB page" below. |
-| `/create/link` | Form to create a "bring your own link" event. No longer linked from `/` since `/` became the admin gateway — still a live route, just currently orphaned (nothing links to it). |
-| `/create/template` | Form to create a "hosted template" event, including ad hoc extra questions. Same orphaned-but-live status as `/create/link`. |
-| `/e/[slug]` | Public event page. Renders host-provided details; either an outbound "RSVP now" link (external_link) or the hosted `RsvpForm` (hosted_template) |
+| `/sender/landing` | Public sell/marketing page (features: design-in-our-editor vs. bring-your-own-card) with Log In / Sign Up buttons. `/sender` redirects here when logged out. |
+| `/sender` | Redirects to `/sender/landing` if no sender session; otherwise the real dashboard — sidebar (New Invitation, Overview, "Pick Up Where You Left Off"), `InvitationGallery` of the sender's own events (via `GET /api/sender/events`). |
+| `/sender/login` | Sender login form (username/password/Remember Me). If zero `users` rows exist in the DB, redirects straight to `/sender/signup` before rendering — see "Auth" below. If a valid sender session already exists, redirects to `/sender`. Links back to `/sender/landing`. |
+| `/sender/signup` | Sender self-serve signup form (name/username/password with a live `StrengthMeter`/Remember Me). Auto-logs-in on success. Links back to `/sender/landing`. |
+| `/e/[slug]` | **Sender's edit surface** (`EventEditor`) — gated on actually owning the event; anyone else is redirected to the public `/receiver/[slug]` link instead of seeing edit affordances for someone else's card. Inline-editable title/host/date/location/description/guest-categories, an image swap (custom_card events, same HEIC/allowlist pipeline as creation), a Publish button pre-publish or a "Published" badge + copyable receiver link post-publish, and a "Preview as Receiver" link to `/receiver/[slug]`. |
+| `/receiver/[slug]` | **The real guest-facing route** ("invitations will be under /receiver," 2026-07 decision). Renders `GuestEventView` — title/host/description/date/location, the card image (custom_card), either an outbound "RSVP now" link (external_link) or the hosted `RsvpForm` (hosted_template/custom_card). **404s for anyone but the owning sender until the event is `published`** — a draft invitation isn't guessable by a guest before the sender hits Publish in the editor. The owning sender hitting this exact same route (no separate preview mode) sees the identical render a guest would, so there's no way for a preview to drift from reality. |
+| `/admin/db` | **Real page**, gated behind a valid admin session — see "Access DB page" below. |
+| `/create/link` | Form to create a "bring your own link" event; requires a sender session (routes to `/api/events` POST, sender-gated). Orphaned from the nav (nothing links to it) but functional; redirects to `/e/[slug]?mode=edit` on success. |
+| `/create/template` | Form to create a "hosted template" event, including ad hoc extra questions. Same orphaned-but-functional status as `/create/link`. |
 | `POST /api/admin/login` | `{ username, password, rememberMe }` — hardcoded admin credential check (see "Auth"), sets `admin_session` cookie |
 | `POST /api/sender/login` | `{ username, password, rememberMe }` — bcrypt-checked against `users`, sets `sender_session` cookie. Runs `bcrypt.compare` against a fixed dummy hash even when the username doesn't exist, so "no such user" and "wrong password" take the same wall-clock time. |
 | `POST /api/sender/register` | `{ name, username, password, rememberMe }` — creates a `users` row (bcrypt-hashed + `raw_password` dev mirror), auto-logs-in on success, broadcasts `db-changed` (kind `users`) |
 | `GET /api/sender/has-account` | `{ hasAccount: boolean }` — whether any `users` row exists at all; drives `/sender/login`'s forced-signup redirect |
+| `GET /api/sender/events` | `{ events }` — the calling sender's own events (`created_by = auth.userId`), newest first; **sender-gated**. Backs `InvitationGallery`. |
 | `GET /api/session` | `{ authenticated, admin, sender: { username } | null }` — reads both the `admin_session` and `sender_session` cookies independently; both can be valid at once in the same browser |
 | `POST /api/logout` | `{ type: "admin" | "sender" }` (or omitted, clears both) — clears the relevant session cookie via `maxAge: 0` |
-| `POST /api/events` | Create an event (either kind); returns `{ slug }`; broadcasts `db-changed` (kind `events`) |
-| `GET /api/events/[slug]` | Fetch one event by slug — no auth gate, public (used by `/e/[slug]`) |
-| `DELETE /api/events/[slug]` | Delete an event (added 2026-07-24 for Access DB's RSVP Links table); **admin-gated** (2026-07-24); broadcasts `db-changed` (kind `events`) |
-| `POST /api/events/[slug]/rsvps` | Submit a guest RSVP against an event |
-| `GET /api/dev/db` | Returns `{ users, events }` — flat, unpaginated; **admin-gated** (2026-07-24) |
+| `POST /api/events` | Create an event (any kind, including `custom_card`); **sender-gated**, stamps `created_by`; returns `{ slug }`; broadcasts `db-changed` (kind `events`). `custom_card` requires `cardImageUrl` to pass `isAcceptedImageDataUrl` (see "Image uploads" below). |
+| `GET /api/events/[slug]` | Fetch one event by slug — no auth gate, public (used by `/receiver/[slug]`'s live-refresh) |
+| `PUT /api/events/[slug]` | Edit an event's content — title/host/description/date/location/guestCategories/(custom_card) cardImageUrl, and `published: true` to publish; **sender-gated + ownership-checked** (event's `created_by` must match the caller). `published` only ever moves `false → true` through this route — an ordinary content save never sends it, so it's never silently un-published. Broadcasts `db-changed`. |
+| `DELETE /api/events/[slug]` | Delete an event (Access DB's RSVP Links table); **admin-gated**; broadcasts `db-changed` (kind `events`) |
+| `POST /api/events/[slug]/rsvps` | Submit a guest RSVP against an event — `{ guestName, attending, categoryCounts, answers }`. **404s if the event isn't `published`** (defense in depth behind `/receiver/[slug]`'s own page-level gate). `categoryCounts` is clamped/filtered server-side to only the event's own `guest_categories` keys, each a non-negative integer; `guest_count` is stored as the derived sum. Broadcasts `db-changed`. |
+| `GET /api/events/[slug]/rsvps/stats` | `{ guestCategories, rsvps }` — full RSVP list + category breakdown for one event; **sender-gated + ownership-checked**. Backs the dashboard's `StatsModal` pie chart. |
+| `GET /api/dev/db` | Returns `{ users, events }` — flat, unpaginated; **admin-gated** |
 | `POST /api/dev/db` | `{ action: "seed" }` — clears all data, inserts 3 sample users + 3 sample events; **admin-gated**; broadcasts `db-changed` for both kinds |
 | `DELETE /api/dev/db` | `{ confirmation: "PURGE DATABASE" }` — clears `rsvps`, `events`, `users`; **admin-gated**; broadcasts `db-changed` for both kinds |
 | `PUT /api/users/[id]` | `{ name, username }` — rename a user; **admin-gated**; broadcasts `db-changed` (kind `users`) |
@@ -60,35 +64,44 @@ Current technical truth for the RSVP app. Narrative history and working-style no
 | `PUT /api/users/[id]/password` | `{ newPassword }` — reset a user's password (bcrypt-hashed + a `raw_password` dev mirror); **admin-gated**; broadcasts `db-changed` (kind `users`) |
 | `GET /api/health` | DB latency (`SELECT 1` round-trip), DB size (`pg_database_size`), connection-pool stats (total/idle/waiting), live WS listener count. No auth gate — see Access DB page notes. |
 
-**Open question:** `/create/link` and `/create/template` have no inbound link anywhere now that `/` is the admin gateway. Likely destination is somewhere under the future "RSVP Sender" flow, but that hasn't been decided — see `CLAUDE.md`.
-
 ### Data model
 
 `src/lib/db.ts` owns the Postgres pool (memoized on `globalThis` in dev to survive HMR) and `initDb()`, an idempotent migration runner memoized per-process — same shape as the reference project's `initDb()`. Called at the top of every route/page that touches the DB.
 
 **`events`**
 - `id UUID PK`, `slug TEXT UNIQUE` (nanoid, 8 chars, non-ambiguous alphabet — see `src/lib/slug.ts`)
-- `kind TEXT CHECK IN ('external_link', 'hosted_template')`
+- `kind TEXT CHECK IN ('external_link', 'hosted_template', 'custom_card')`
 - `title TEXT NOT NULL`, `host_name`, `description`, `event_date TIMESTAMPTZ`, `location`
 - `external_url` — set only when `kind = 'external_link'`
 - `questions JSONB` — array of `RsvpQuestion` (`{ id, label, type: 'text'|'boolean', required }`), set only when `kind = 'hosted_template'`
+- `card_image_url TEXT` — a data URL (`data:<mime>;base64,...`), set only when `kind = 'custom_card'`; see "Image uploads" below
+- `created_by UUID FK -> users(id) ON DELETE SET NULL` — the sender who owns this invitation
+- `guest_categories JSONB DEFAULT '["Adults", "Kids"]'` — sender-defined category labels for the "how many of each" guest-count breakdown; see "Guest categories" below
+- `published BOOLEAN DEFAULT false` — gates `/receiver/[slug]` and RSVP submission; only ever flips `false → true` via `PUT /api/events/[slug]` (see Routes table)
 - `created_at TIMESTAMPTZ DEFAULT now()`
 
 **`rsvps`**
 - `id UUID PK`, `event_id UUID FK -> events(id) ON DELETE CASCADE`
-- `guest_name TEXT NOT NULL`, `attending BOOLEAN NOT NULL`, `guest_count INTEGER DEFAULT 1`
+- `guest_name TEXT NOT NULL`, `attending BOOLEAN NOT NULL`, `guest_count INTEGER DEFAULT 1` — stored derived sum of `category_counts`, kept for backward compatibility with anything reading it
+- `category_counts JSONB DEFAULT '{}'` — per-category breakdown keyed by the event's own `guest_categories` at submission time (e.g. `{"Adults": 2, "Kids": 1}`)
 - `answers JSONB DEFAULT '{}'` — keyed by the event's `questions[].id`
 - `created_at TIMESTAMPTZ DEFAULT now()`
 - Index on `event_id`
 
-**`users`** (added 2026-07-24 for Access DB — see below)
+**`users`**
 - `id UUID PK`, `name TEXT NOT NULL`, `username TEXT UNIQUE NOT NULL`
 - `password TEXT NOT NULL` — bcrypt-hashed
 - `raw_password TEXT` — dev-only plaintext mirror, same intentional technical-debt pattern as the reference project's `restaurants` table
 - `created_at TIMESTAMPTZ DEFAULT now()`
-- Standalone table, not yet wired to `events` (no `created_by` FK) — these are RSVP host accounts, but events aren't yet tied to a creating user. That link is future work once real host login exists on `/create/*`.
+- Linked to `events` via `events.created_by` — a sender's dashboard (`GET /api/sender/events`) shows only the events they created.
 
 Types mirrored in TypeScript at `src/lib/types.ts` (`EventRecord`, `RsvpRecord`, `EventKind`, `RsvpQuestion`, `UserRecord`).
+
+**Migration idempotency gotcha**: `migrate()` in `src/lib/db.ts` re-runs its full body from scratch whenever `initPromise` gets reset — which happens on every dev-server restart, and can also happen mid-session if Turbopack Fast Refresh reloads `db.ts` itself after an edit (a new module instance means a fresh `initPromise`). Every `ALTER`/constraint statement must therefore tolerate re-running against a DB that already has that change applied. Hit this concretely 2026-07: `events_kind_check`'s drop-then-add was written as two separate `pool.query()` calls, which left a window where a second `migrate()` call (racing a dev-server restart) could see the constraint already gone and then fail re-adding it ("constraint already exists"). Fixed by combining the `DROP CONSTRAINT IF EXISTS` + `ADD CONSTRAINT` into one multi-statement query so they run as a single round trip.
+
+**Image uploads** (`src/lib/image-upload.ts`): a real codec allowlist, not a loose `image/*` check — accepts PNG/JPEG/WebP/GIF/AVIF (`ACCEPTED_IMAGE_TYPES`), enforced both client-side (`isAcceptedImageType`, the upload form) and server-side (`isAcceptedImageDataUrl`, inspecting the data URL's own declared MIME prefix in `POST /api/events` and `PUT /api/events/[slug]`) since a direct API call bypasses the client picker entirely. SVG is deliberately excluded — it can embed `<script>`/event handlers and isn't sanitized before being rendered back on the public guest page, a real stored-XSS path. HEIC/HEIF (the default iPhone photo format, which no browser decodes natively) is auto-transcoded to JPEG client-side via `convertHeicToJpeg()` (dynamic `import("heic2any")`, client-only — never imported into a server route, since the library touches browser-only globals at module load).
+
+**Guest categories** (`src/lib/guest-categories.ts`): `parseGuestCategories(raw)` turns a sender's free-typed "Adults, Kids, Moms, Dads, Pregnant Penguins" into a trimmed, empty-token-filtered array, falling back to `DEFAULT_GUEST_CATEGORIES` (`["Adults", "Kids"]`) if nothing usable was typed. Applies to any RSVP-taking event kind (`hosted_template`/`custom_card`); the editor skips the field entirely for `external_link` events, which never show the hosted RSVP form. The guest-facing `RsvpForm` renders one number input per category plus a live-computed, non-editable total ("Adults + Kids = N"), generalized to however many categories the event defines.
 
 ## Auth
 
@@ -103,16 +116,16 @@ Added 2026-07-24. Two independent, unrelated auth systems — ported from the re
 
 **Enforcement layers** (`src/lib/auth.ts`): `requireAdmin()` / `requireSender()` are the real security boundary — every admin-gated API route calls one as its first line and returns its 401 response early if unauthorized. Pages additionally do a client-side `GET /api/session` check + redirect for UX (no flash of protected content), but that's not the actual gate — confirmed via a direct unauthenticated `curl` to `GET /api/dev/db` returning a real 401, not just a client-side bounce.
 
-**Gated behind `requireAdmin()`**: the `/admin/db` page itself (client-side redirect to `/` if no admin session) plus its backing routes — `/api/dev/db` (GET/POST/DELETE), `/api/users/[id]` (PUT/DELETE), `/api/users/[id]/password` (PUT), `/api/events/[slug]` DELETE only (GET stays public, used by `/e/[slug]`).
+**Gated behind `requireAdmin()`**: the `/admin/db` page itself (client-side redirect to `/` if no admin session) plus its backing routes — `/api/dev/db` (GET/POST/DELETE), `/api/users/[id]` (PUT/DELETE), `/api/users/[id]/password` (PUT), `/api/events/[slug]` DELETE only (GET stays public).
 
-**Not yet built**: `users` still isn't linked to `events` (no `created_by` FK) — a sender account and the events it creates aren't connected yet, so a signed-in sender has no way to see "their" events specifically. Real Sender dashboard content beyond the "Signed in as X" placeholder.
+**Gated behind `requireSender()` + ownership check** (event's `created_by` must equal the caller's `userId`, not just a valid sender session): `PUT /api/events/[slug]`, `GET /api/events/[slug]/rsvps/stats`. **Gated behind `requireSender()` alone** (no ownership check needed — creates a new row / lists the caller's own): `POST /api/events`, `GET /api/sender/events`.
 
 ## Access DB page (`/admin/db`)
 
 Built 2026-07-24, modeled structurally on the reference project's own `admin/db` page (tables, search boxes, type-to-confirm destructive-action modal, shift-click-to-skip-confirm deletes) but retargeted to RSVP's actual data and re-themed to RSVP's fonts/colors/icons — not a copy of the reference's Bistro Glaze toast styling or its restaurant/order/staff domain.
 
 - **Users table**: name, username, hashed password, raw password (dev mirror), with rename / reset-password / delete actions. This is the first piece of a real host-accounts system, now actually authenticated against by `/sender/login` — see "Auth" above.
-- **RSVP Links table**: existing `events`, showing each one's real `/e/[slug]` guest link (copyable via `CopyableValue`), kind badge (`external_link`/`hosted_template`), created date, delete.
+- **RSVP Links table**: existing `events`, showing each one's real `/receiver/[slug]` guest link (copyable via `CopyableValue` — resolves regardless of `published` state, since admin visibility isn't gated the way guest access is), kind badge (`external_link`/`hosted_template`; `custom_card` isn't yet a separate badge case here), created date, delete.
 - Seed / Purge buttons, same type-to-confirm `Modal` pattern as the reference.
 - **Admin-gated** (2026-07-24) — both the page (client-side redirect to `/`) and its backing API routes (server-side `requireAdmin()` 401) — see "Auth" above for the mechanism.
 - **Live updates via WebSocket** (2026-07-24) — the page subscribes to `useWebSocket()` and refetches (`GET /api/dev/db`) whenever a `db-changed` message arrives, so a user signing up or a link being created/deleted from anywhere (another tab, another device, a direct API call) shows up within about a second with no manual refresh and no polling. See "WebSockets" below for the broadcast mechanism.
@@ -123,8 +136,8 @@ Built 2026-07-24, modeled structurally on the reference project's own `admin/db`
 
 - `src/lib/useWebSocket.ts` — reusable client hook (connect to `/ws`, JSON message parsing, reconnect with exponential backoff capped at 15s, returns `{status, messagesByType}` keyed by each message's own `type`). Not hardcoded to health data — any live feature subscribes to its own message `type` over the same connection instead of opening a second socket. First real consumer beyond `HealthPin`'s indirect listener-count use: `/admin/db`'s live-refresh (2026-07-24, see below).
 - `HealthPin` (`src/components/ui/HealthPin.tsx`) was rebuilt 2026-07-24 as a real port of the reference project's own `HealthPin` — polls `GET /api/health` (not WS-heartbeat-driven anymore) for DB round-trip latency, DB size, connection-pool stats, live WS listener count (still read from `globalThis.__rsvpWsClients`, just via the HTTP endpoint now), plus the client's own round-trip time to the server. Same tiering (`healthy`/`ok`/`bad`/`terrible`), same poll cadence (10s idle / 1.5s while the popover is open), same hover/tap popover UI, same debounced-250ms immediate-fetch-on-open and tab-visibility-pause gotchas as the reference. Only intentional differences from the reference: no admin-vs-kitchen auth gating (RSVP's admin gate is now real, but `/api/health` itself still isn't gated — matches the reference's own kitchen-facing exposure pattern, not an oversight) and no audit-log size stat (RSVP has no audit table). `showDbSize` prop (opt-in, passed from `/admin/db` only) inlines the DB's on-disk size next to the status dot.
-- **`db-changed` broadcast (added 2026-07-24)**: `server.js` exposes its `broadcast()` function on `globalThis.__rsvpBroadcast` (see Stack section's `server.js` note and its restart gotcha). `src/lib/ws-broadcast.ts` wraps it as `broadcastDbChanged(kind: "users" | "events")`, called from every route that inserts/updates/deletes a `users` or `events` row (`/api/sender/register`, `/api/dev/db` POST/DELETE, `/api/users/[id]` PUT/DELETE, `/api/users/[id]/password` PUT, `/api/events` POST, `/api/events/[slug]` DELETE) immediately after the write succeeds. `/admin/db` is the one current subscriber — see its section above. Live-verified 2026-07-24: a signup fired from a separate HTTP connection appeared in the Users table within ~1.5s with no manual refresh, screenshotted before/after in headless Chrome.
-- No other real-time data flows over the socket yet.
+- **`db-changed` broadcast**: `server.js` exposes its `broadcast()` function on `globalThis.__rsvpBroadcast` (see Stack section's `server.js` note and its restart gotcha). `src/lib/ws-broadcast.ts` wraps it as `broadcastDbChanged(kind: "users" | "events")`, called from every route that inserts/updates/deletes a `users` or `events` row (`/api/sender/register`, `/api/dev/db` POST/DELETE, `/api/users/[id]` PUT/DELETE, `/api/users/[id]/password` PUT, `/api/events` POST, `PUT /api/events/[slug]`, `POST /api/events/[slug]/rsvps`, `DELETE /api/events/[slug]`) immediately after the write succeeds. Live-verified: a signup fired from a separate HTTP connection appeared in the Users table within ~1.5s with no manual refresh, screenshotted before/after in headless Chrome.
+- **Subscribers**: `/admin/db` (refetches `GET /api/dev/db`); `GuestEventView` (`/receiver/[slug]`, refetches `GET /api/events/[slug]` — so a guest who has the page open while the host edits it in `EventEditor` sees the update live, verified end to end with two independent headless-Chrome tabs); `StatsModal` (refetches `GET /api/events/[slug]/rsvps/stats` while open, so a guest submitting an RSVP updates the sender's pie chart without a manual reopen).
 
 ## UI and Design Rules
 
@@ -142,38 +155,37 @@ Built 2026-07-24, modeled structurally on the reference project's own `admin/db`
 
 ## Current State / What's Built
 
-As of 2026-07-24:
-
-- **`/` is the admin gateway page** (`src/app/page.tsx`, `AdminGatewayPage`), fully overhauled from the 2026-07-23 static version by exploring the reference project's real source directly (not just its docs). Sidebar nav: RSVP Sender (`/sender`) and RSVP Receiver (`/receiver`) are standalone top-level routes (moved off `/admin/*` this same day — see Routes table); Access DB (`/admin/db`) is a real, working page, only shown in the nav once an admin session exists. The surrounding chrome (Settings pill, HealthPin, Accessibility menu, theme toggle, UI size toggle) is real, working functionality, not placeholders. When logged out, the main content area is a real inline admin login `AuthCard`, not a placeholder.
+- **`/` is the admin gateway page** (`src/app/page.tsx`, `AdminGatewayPage`). Sidebar nav: RSVP Sender (`/sender`) is the one standalone top-level audience link (RSVP Receiver was removed from this nav — see Routes table); Access DB (`/admin/db`) is a real, working page, only shown once an admin session exists. Chrome (Settings pill, HealthPin, Accessibility menu, theme toggle, UI size toggle) is real, working functionality. When logged out, the main content area is a real inline admin login `AuthCard`.
 - `/admin` redirects (307) to `/`.
 - **`/admin/db` (Access DB) is a real page**, admin-gated, with live WebSocket updates — Users + RSVP Links tables, seed/purge, search, rename/reset-password/delete. See "Access DB page" and "Auth" above.
-- **Real auth system, both admin and sender** (built 2026-07-24) — signed-cookie sessions, admin hardcoded credentials, sender self-serve signup/login with forced-signup-when-no-accounts-exist, Remember Me, live-verified end to end in headless Chrome. See "Auth" above.
-- **`/sender` redirects to `/sender/login` if not authenticated**, otherwise shows a "Signed in as X" placeholder — the real sender dashboard content isn't built yet.
-- **`/api/health` is real** — DB latency/size/pool stats, live WS listener count. `HealthPin` polls it directly (no longer WS-heartbeat-only).
-- **Color palette corrected 2026-07-24** — see "UI and Design Rules" above and `theme.md`'s correction note. Coral is now genuinely pink-red, backgrounds carry real saturated hue instead of neutral warm-brown/cream, and sage/lavender are actually used in the built UI.
-- Both create flows (`/create/link`, `/create/template`) still functional but orphaned (no page links to them).
-- `/e/[slug]` and the hosted RSVP form still working as of the 2026-07-23 DB-backed verification.
+- **Real auth system, both admin and sender** — signed-cookie sessions, admin hardcoded credentials, sender self-serve signup/login with forced-signup-when-no-accounts-exist, Remember Me.
+- **`/sender` is a real dashboard**, not a placeholder — sidebar (New Invitation button, Overview, "Pick Up Where You Left Off"), `InvitationGallery` showing the sender's own events as hover-interactive cards (Continue → editor, Statistics → `StatsModal`, Copy Link → clipboard, shown only once published). `/sender/landing` is the public sell page for logged-out visitors.
+- **Three invitation-creation paths**: bring-your-own-link and build-a-template (`/create/link`, `/create/template`, both orphaned from nav but functional) plus the newer **bring-your-own-card** flow (`BringYourOwnCardForm`, reachable from the dashboard's New Invitation modal) — upload an image (any of the accepted codecs, HEIC auto-converted) plus title/host/date/location/description, creates a `custom_card` event.
+- **Publish flow**: every invitation starts as a draft (`published = false`). `/e/[slug]` (the editor) shows a Publish button pre-publish; publishing flips the flag permanently true and reveals the real, copyable `/receiver/[slug]` link — the slug never changes across any number of later edits, only the content guests see updates. `/receiver/[slug]` 404s for non-owners until published; the owner can preview the exact same route pre-publish.
+- **Guest categories + per-category RSVP counts**: senders can customize the guest-count breakdown per event (default "Adults, Kids", free-typed comma-separated list, any RSVP-taking kind) via the editor; the guest-facing `RsvpForm` shows one themed number input per category plus a live total, and a themed Yes/No attendance toggle (replacing the original unstyled radio buttons).
+- **Statistics** (`StatsModal`, opened from a gallery card's hover row): a pie chart (recharts) of attending RSVPs broken down by category, plus a per-guest breakdown list. Colors are a real validated categorical palette (dataviz-skill six-checks, RSVP's own coral/lavender/gold hues) — only the first 3 categories get a distinct validated hue; a 4th+ custom category shares one neutral gray fill and relies on its direct label, per the skill's own guidance that more hues stop being reliably distinguishable under a pie chart's "any two wedges can be neighbors" constraint.
+- **Real codec allowlist + HEIC support** for all image uploads (creation and editing) — see "Image uploads" above.
+- **`/api/health` is real** — DB latency/size/pool stats, live WS listener count. `HealthPin` polls it directly.
+- **Color palette corrected** — see "UI and Design Rules" above and `theme.md`'s correction note. Coral is genuinely pink-red, backgrounds carry real saturated hue, sage/lavender are actually used in the built UI.
 - `npx tsc --noEmit` and `npx eslint .` both pass clean as of the latest change.
-- `theme.md` (2026-07-23, corrected 2026-07-24): research-backed color/typography decision record — see that file for the WCAG-contrast-verified token table.
-- **Sidebar layout fixed 2026-07-24**: Access DB originally sat directly adjacent to Log Out (separated only by a thin divider), which the user flagged as an overshoot-misclick risk ("what if someone goes to click access db but they overshoot and click log out?"). Fixed to match the reference project's actual grouping — Access DB joined the Sender/Receiver block, Log Out pushed to the bottom via a flex spacer with its own top border, real vertical distance between them.
+- `theme.md`: research-backed color/typography decision record — see that file for the WCAG-contrast-verified token table.
 
 ## Explicitly NOT built yet
 
-- No real content behind `/sender` beyond a "Signed in as X" placeholder; `/receiver` is still an empty stub.
-- `users` isn't yet linked to `events` (no `created_by` FK) — a sender account and the events it creates aren't connected yet, so a signed-in sender can't see "their" events specifically.
-- No host-facing dashboard/guest list view (a host currently has no way to see who RSVP'd — only the DB holds that, viewable via Access DB).
-- No auth of any kind on guest-facing routes — anyone with an event's slug can view it; anyone can submit an RSVP. No spam/rate-limiting.
-- No visual template customization (colors, images, layout) — template events all render through one fixed layout.
-- No QR code generation on the event page yet, despite the package being installed.
+- No real "design in our editor" invitation-creation flow yet — the New Invitation modal's other option besides "bring your own card" is a disabled "coming soon" button; needs its own research pass before building.
+- No un-publish / take-down control — publishing is one-directional by design (see Routes table's `PUT /api/events/[slug]` note); there's no way for a sender to pull a link back to draft once it's live.
+- No host-facing guest list view beyond the Statistics pie chart + per-guest breakdown card — no CSV export, no search/filter within a single event's RSVPs.
+- No auth of any kind on RSVP submission beyond the `published` gate — anyone with a published slug can submit an RSVP. No spam/rate-limiting.
+- No visual template customization beyond the custom-card image + guest-categories text field — template events otherwise render through one fixed layout.
+- No QR code generation on the guest page yet, despite the package being installed.
 - No tests.
 - No production deployment/hosting decision made.
 - `SESSION_SECRET` and the admin credential pair are still dev-only hardcoded values — see "Auth" above for what needs to move to env vars before any non-local deployment.
 
 ## Next Likely Steps (not started)
 
-- Build out real dashboard content at `/sender` (beyond the "Signed in as X" placeholder) and `/receiver`.
-- Link `users` to `events` (a `created_by` FK) so a sender account owns the events it creates.
-- Decide where `/create/link` and `/create/template` should be reachable from now that `/` is the admin gateway — likely folded into the future RSVP Sender dashboard.
-- Add a minimal host view (e.g. `/e/[slug]/manage` or similar) to see submitted RSVPs.
-- Wire up `qrcode` on the event page for easy sharing.
-- Any further live-updating data (e.g. a host dashboard watching RSVP counts) should subscribe to its own message `type` over the existing `useWebSocket` connection, following the `db-changed` precedent, rather than opening a second socket.
+- Build the "design in our editor" invitation-creation flow (presets by occasion, mix-and-match) — flagged in the New Invitation modal as a disabled placeholder, needs its own research pass.
+- Decide whether an un-publish/take-down control is ever needed, or whether one-directional publish stays the permanent design.
+- Add a minimal host RSVP-management view beyond the Statistics modal (e.g. per-guest edit/delete, CSV export).
+- Wire up `qrcode` on the guest page for easy sharing.
+- Any further live-updating data should subscribe to its own message `type` over the existing `useWebSocket` connection, following the `db-changed` precedent, rather than opening a second socket.

@@ -1,7 +1,9 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { initDb, pool } from "@/lib/db";
+import { verifySessionToken, SENDER_SESSION_COOKIE_NAME } from "@/lib/session";
 import type { EventRecord } from "@/lib/types";
-import RsvpForm from "./RsvpForm";
+import EventEditor from "./EventEditor";
 
 async function getEvent(slug: string): Promise<EventRecord | null> {
   await initDb();
@@ -10,7 +12,13 @@ async function getEvent(slug: string): Promise<EventRecord | null> {
   return result.rows[0] as EventRecord;
 }
 
-export default async function EventPage({
+/**
+ * The sender's edit surface -- distinct from /receiver/[slug], the guest-
+ * facing route. Only the owning sender can reach the real editor here;
+ * anyone else (no session, a different sender) is sent to the public
+ * receiver link instead of seeing edit affordances for someone else's card.
+ */
+export default async function EventEditPage({
   params,
 }: {
   params: Promise<{ slug: string }>;
@@ -19,38 +27,11 @@ export default async function EventPage({
   const event = await getEvent(slug);
   if (!event) notFound();
 
-  return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-6 px-6 py-16">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold">{event.title}</h1>
-        {event.host_name && (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Hosted by {event.host_name}
-          </p>
-        )}
-        {event.description && <p className="text-sm">{event.description}</p>}
-        {event.event_date && (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            {new Date(event.event_date).toLocaleString()}
-          </p>
-        )}
-        {event.location && (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">{event.location}</p>
-        )}
-      </div>
+  const cookieStore = await cookies();
+  const senderSession = verifySessionToken(cookieStore.get(SENDER_SESSION_COOKIE_NAME)?.value);
+  const isOwner = senderSession?.type === "sender" && senderSession.userId === event.created_by;
 
-      {event.kind === "external_link" ? (
-        <a
-          href={event.external_url ?? "#"}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="rounded-full bg-black px-6 py-3 text-center font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-        >
-          RSVP now
-        </a>
-      ) : (
-        <RsvpForm slug={event.slug} questions={event.questions} />
-      )}
-    </main>
-  );
+  if (!isOwner) redirect(`/receiver/${slug}`);
+
+  return <EventEditor initialEvent={event} />;
 }
