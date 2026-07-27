@@ -75,10 +75,33 @@ $dockerDesktopProc = Get-Process "Docker Desktop" -ErrorAction SilentlyContinue
 if (-not $dockerDesktopProc) {
     Write-Info "Docker Desktop does not appear to be running. Skipping."
 } else {
-    Stop-Process -Name "Docker Desktop" -Force -ErrorAction SilentlyContinue
-    # Docker Desktop's backend runs as several helper processes (com.docker.*)
-    # that linger briefly after the main window process is killed.
-    Get-Process "com.docker.*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    # `docker desktop stop` (the Docker Desktop CLI plugin, not Stop-Process)
+    # asks Docker Desktop to shut down its own backend gracefully -- it tears
+    # down its WSL-hosted engine/data distros itself before exiting, which is
+    # what actually lets `wsl --shutdown` below finish cleanly. Previously
+    # this used Stop-Process -Force (a hard kill, equivalent to SIGKILL),
+    # which skipped that teardown entirely -- the backend never got a chance
+    # to tell WSL it was done, so vmmemWSL kept running in Task Manager even
+    # after this script finished. No -Force flag here on purpose: that flag
+    # exists specifically to skip the graceful path, which is the opposite of
+    # what this step is for. Synchronous by default (no -d/--detach), so this
+    # blocks until Docker Desktop confirms it's actually stopped rather than
+    # racing the next step.
+    $dockerDesktopCli = Get-Command "docker" -ErrorAction SilentlyContinue
+    if ($dockerDesktopCli) {
+        docker desktop stop --timeout 30
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok "Docker Desktop stopped gracefully."
+        } else {
+            Write-Warn "docker desktop stop reported an error (exit code $LASTEXITCODE). Falling back to a forceful stop."
+            Stop-Process -Name "Docker Desktop" -Force -ErrorAction SilentlyContinue
+            Get-Process "com.docker.*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        }
+    } else {
+        Write-Warn "docker CLI not found -- cannot use the graceful 'docker desktop stop' path. Falling back to a forceful stop."
+        Stop-Process -Name "Docker Desktop" -Force -ErrorAction SilentlyContinue
+        Get-Process "com.docker.*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    }
 
     $stopped = Wait-For -Label "Docker Desktop closed" -MaxWaitSeconds 30 -PollSeconds 2 -CheckDone {
         -not (Get-Process "Docker Desktop" -ErrorAction SilentlyContinue)

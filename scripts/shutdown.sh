@@ -80,10 +80,26 @@ docker_desktop_running() {
 if ! command -v tasklist >/dev/null 2>&1; then
     warn "tasklist not available -- cannot check/stop Docker Desktop from this shell. Skipping."
 elif docker_desktop_running; then
-    taskkill //F //IM "Docker Desktop.exe" >/dev/null 2>&1 || true
-    # Docker Desktop's backend runs as several helper processes
-    # (com.docker.*.exe) that linger briefly after the main window closes.
-    taskkill //F //IM "com.docker.backend.exe" >/dev/null 2>&1 || true
+    # `docker desktop stop` (the Docker Desktop CLI plugin) asks Docker
+    # Desktop to shut down its own backend gracefully -- it tears down its
+    # WSL-hosted engine/data distros itself before exiting, which is what
+    # actually lets `wsl --shutdown` below finish cleanly. Previously this
+    # used taskkill /F (a hard kill), which skipped that teardown entirely --
+    # the backend never got a chance to tell WSL it was done, so vmmemWSL
+    # kept running in Task Manager even after this script finished. No
+    # --force flag here on purpose: that flag exists specifically to skip the
+    # graceful path, which is the opposite of what this step is for.
+    # Synchronous by default (no -d/--detach), so this blocks until Docker
+    # Desktop confirms it's actually stopped rather than racing the next step.
+    if command -v docker >/dev/null 2>&1 && docker desktop stop --timeout 30; then
+        ok "Docker Desktop stopped gracefully."
+    else
+        warn "docker desktop stop unavailable or reported an error. Falling back to a forceful stop."
+        taskkill //F //IM "Docker Desktop.exe" >/dev/null 2>&1 || true
+        # Docker Desktop's backend runs as several helper processes
+        # (com.docker.*.exe) that linger briefly after the main window closes.
+        taskkill //F //IM "com.docker.backend.exe" >/dev/null 2>&1 || true
+    fi
 
     docker_desktop_stopped() { ! docker_desktop_running; }
     if wait_for "Docker Desktop closed" 30 2 docker_desktop_stopped; then
