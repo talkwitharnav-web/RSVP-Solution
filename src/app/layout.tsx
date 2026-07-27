@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Bricolage_Grotesque, Plus_Jakarta_Sans } from "next/font/google";
+import { GlobalSettingsToggles } from "@/components/ui/GlobalSettingsToggles";
 import "./globals.css";
 
 const bricolage = Bricolage_Grotesque({
@@ -66,7 +67,10 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <GlobalSettingsToggles />
+        {children}
+      </body>
     </html>
   );
 }

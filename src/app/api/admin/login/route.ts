@@ -6,6 +6,7 @@ import {
   SESSION_COOKIE_MAX_AGE_DEFAULT,
   SESSION_COOKIE_SECURE,
 } from "@/lib/session";
+import { rateLimit } from "@/lib/rate-limit";
 
 // Hardcoded admin credentials, matching the reference project's own
 // pre-public-launch approach — see CLAUDE.md for a note to move these to
@@ -14,6 +15,11 @@ const ADMIN_USERNAME = "darkglory";
 const ADMIN_PASSWORD = "R$vp@dm!n";
 
 export async function POST(req: Request) {
+  // Only one valid credential pair exists -- an unlimited endpoint is a
+  // trivial brute-force target. 10 attempts / 5 minutes per IP.
+  const limited = rateLimit(req, "admin-login", 10, 5 * 60 * 1000);
+  if (limited) return limited;
+
   const body = await req.json().catch(() => ({}));
   const { username, password, rememberMe } =
     body as { username?: unknown; password?: unknown; rememberMe?: unknown };

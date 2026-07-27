@@ -3,8 +3,6 @@
 import { useState, useEffect, FormEvent } from "react";
 import Link from "next/link";
 import { MailOpen, Send, Database, LogOut, Lock, type LucideIcon } from "lucide-react";
-import { SettingsToggles } from "@/components/ui/SettingsToggles";
-import { HealthPin } from "@/components/ui/HealthPin";
 import { AuthCard } from "@/components/ui/AuthCard";
 import { Input, Label } from "@/components/ui/Input";
 import { Checkbox } from "@/components/ui/Checkbox";
@@ -64,8 +62,6 @@ export default function AdminGatewayPage() {
 
   return (
     <div className="flex min-h-screen">
-      <SettingsToggles health={hasAdminSession ? <HealthPin /> : undefined} />
-
       <aside className="flex w-64 flex-shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-1)] px-5 py-6">
         <div className="mb-8 flex items-center gap-3 px-3 text-[var(--color-accent-lavender)]">
           <MailOpen className="h-4 w-4 flex-shrink-0" strokeWidth={2} />

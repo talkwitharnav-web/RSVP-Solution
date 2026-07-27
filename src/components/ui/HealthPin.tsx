@@ -80,8 +80,17 @@ function clientTierFromLatency(ms: number): HealthTier {
  * human-readable) inline in the pill itself -- opt-in, passed from
  * admin/db, since disk usage isn't something worth showing on every page,
  * but is directly relevant on the page that manages the DB.
+ *
+ * `detailLevel` controls how much the popover reveals: "full" (admin/db)
+ * shows everything including pool stats and live listener count; "basic"
+ * (the default everywhere else, incl. the sender dashboard) shows only
+ * connection + DB latency -- pool/listener internals aren't meaningful to a
+ * non-admin audience.
  */
-export function HealthPin({ showDbSize = false }: { showDbSize?: boolean } = {}) {
+export function HealthPin({
+  showDbSize = false,
+  detailLevel = "basic",
+}: { showDbSize?: boolean; detailLevel?: "basic" | "full" } = {}) {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [clientLatencyMs, setClientLatencyMs] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
@@ -200,7 +209,7 @@ export function HealthPin({ showDbSize = false }: { showDbSize?: boolean } = {})
                   <dd className="text-[var(--color-text-primary)] font-medium">{formatBytes(health.db.sizeBytes)}</dd>
                 </div>
               )}
-              {health.db.pool && (
+              {detailLevel === "full" && health.db.pool && (
                 <div className="flex justify-between gap-3">
                   <dt className="text-[var(--color-text-muted)]">DB pool</dt>
                   <dd className="text-[var(--color-text-primary)] font-medium">
@@ -209,7 +218,7 @@ export function HealthPin({ showDbSize = false }: { showDbSize?: boolean } = {})
                   </dd>
                 </div>
               )}
-              {health.ws.connectedClients != null && (
+              {detailLevel === "full" && health.ws.connectedClients != null && (
                 <div className="flex justify-between gap-3">
                   <dt className="text-[var(--color-text-muted)]">Live listeners</dt>
                   <dd className="text-[var(--color-text-primary)] font-medium">{health.ws.connectedClients}</dd>

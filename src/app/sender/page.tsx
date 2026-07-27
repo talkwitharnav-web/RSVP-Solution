@@ -3,8 +3,6 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { MailOpen, LayoutGrid, FolderClock, LogOut, Plus } from "lucide-react";
-import { SettingsToggles } from "@/components/ui/SettingsToggles";
-import { HealthPin } from "@/components/ui/HealthPin";
 import { NewInvitationModal } from "./NewInvitationModal";
 import { InvitationGallery } from "./InvitationGallery";
 
@@ -46,8 +44,6 @@ export default function SenderDashboardPage() {
 
   return (
     <div className="flex min-h-screen">
-      <SettingsToggles health={<HealthPin />} />
-
       <aside className="flex w-64 flex-shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-1)] px-5 py-6">
         <div className="mb-8 flex items-center gap-3 px-3 text-[var(--color-accent-lavender)]">
           <MailOpen className="h-4 w-4 flex-shrink-0" strokeWidth={2} />

@@ -8,6 +8,7 @@ import {
   SESSION_COOKIE_MAX_AGE_DEFAULT,
   SESSION_COOKIE_SECURE,
 } from "@/lib/session";
+import { rateLimit } from "@/lib/rate-limit";
 import type { UserRecord } from "@/lib/types";
 
 // Fixed bcrypt hash of an arbitrary string, compared against on every login
@@ -16,6 +17,11 @@ import type { UserRecord } from "@/lib/types";
 const DUMMY_PASSWORD_HASH = "$2a$10$CwTycUXWue0Thq9StjUM0uJ8G8Y5v6f6b5b0b5b0b5b0b5b0b5b0b5";
 
 export async function POST(req: Request) {
+  // Credential-stuffing/brute-force protection, same rationale as admin
+  // login. 10 attempts / 5 minutes per IP.
+  const limited = rateLimit(req, "sender-login", 10, 5 * 60 * 1000);
+  if (limited) return limited;
+
   await initDb();
   const body = await req.json().catch(() => ({}));
   const { username, password, rememberMe } =

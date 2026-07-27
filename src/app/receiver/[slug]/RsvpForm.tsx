@@ -48,6 +48,11 @@ function AttendanceToggle({ attending, onChange }: { attending: boolean; onChang
   );
 }
 
+// No realistic RSVP party has anywhere near this many people in one
+// category -- caps both the absurd-input case (typing 999999999) and keeps
+// the total display from ever needing to grow unreasonably wide.
+const MAX_CATEGORY_COUNT = 999;
+
 /**
  * Per-category guest count row -- generalizes "adults + kids = N total" to
  * however many categories the host defined (guestCategories). Each category
@@ -78,9 +83,28 @@ function CategoryCounts({
               <Input
                 type="number"
                 min={0}
+                max={MAX_CATEGORY_COUNT}
                 inputMode="numeric"
-                value={counts[category] ?? 0}
-                onChange={(e) => onChange(category, Math.max(0, Math.trunc(Number(e.target.value)) || 0))}
+                // A plain controlled `value={counts[category]}` re-renders the
+                // input with the numeric value on every keystroke, which is
+                // what caused the "type 1, see 01" bug -- as soon as a digit
+                // lands, React reflows the field back to Number(current
+                // digits), and a still-empty/zero previous state briefly
+                // shows as a leading zero next to the new digit. Rendering
+                // the raw string (rather than round-tripping through
+                // Number()) lets the field hold intermediate typing states
+                // like "" or a single "1" without a phantom zero.
+                value={counts[category] === 0 ? "" : String(counts[category] ?? "")}
+                placeholder="0"
+                onChange={(e) => {
+                  const raw = e.target.value.replace(/[^0-9]/g, "");
+                  if (raw === "") {
+                    onChange(category, 0);
+                    return;
+                  }
+                  const clamped = Math.min(MAX_CATEGORY_COUNT, parseInt(raw, 10));
+                  onChange(category, clamped);
+                }}
                 className="w-20 text-center"
               />
             </div>
@@ -89,7 +113,7 @@ function CategoryCounts({
         <span className="pb-3 text-lg font-semibold text-[var(--color-text-muted)]">=</span>
         <div className="flex flex-col gap-1">
           <span className="text-xs text-[var(--color-text-muted)]">Total</span>
-          <div className="flex h-[3.125rem] w-20 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-2)] text-base font-semibold text-[var(--color-text-primary)]">
+          <div className="flex h-[3.125rem] min-w-20 w-fit items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 text-base font-semibold text-[var(--color-text-primary)]">
             {total}
           </div>
         </div>

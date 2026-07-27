@@ -9,8 +9,6 @@ import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Modal, ModalActions } from "@/components/ui/Modal";
 import { ToastProvider, useToast } from "@/components/ui/Toast";
-import { SettingsToggles } from "@/components/ui/SettingsToggles";
-import { HealthPin } from "@/components/ui/HealthPin";
 import { CopyableValue } from "@/components/ui/CopyableValue";
 import { StrengthMeter } from "@/components/ui/StrengthMeter";
 import { scorePasswordStrength } from "@/lib/credential-strength";
@@ -349,7 +347,6 @@ function AdminDbContent() {
       </Modal>
 
       <div className="h-dvh flex flex-col overflow-hidden p-4 sm:p-8">
-        <SettingsToggles health={<HealthPin showDbSize />} />
         <div className="shrink-0">
           <PageHeader
             title="Access DB"

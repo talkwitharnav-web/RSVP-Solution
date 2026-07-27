@@ -3,8 +3,13 @@ const next = require("next");
 const { WebSocketServer } = require("ws");
 
 const port = parseInt(process.env.PORT || "3001", 10);
+// Bind to all interfaces (not just localhost) so the app is reachable from
+// other devices on the same LAN (e.g. a phone) via this machine's
+// 192.168.x.x address -- needed to test under real external-network
+// conditions rather than only from the machine running the server.
+const hostname = process.env.HOST || "0.0.0.0";
 const dev = process.env.NODE_ENV !== "production";
-const app = next({ dev });
+const app = next({ dev, hostname });
 const handle = app.getRequestHandler();
 
 // Every connected client, plus the interval handle for the heartbeat push
@@ -32,6 +37,13 @@ globalThis.__rsvpBroadcast = broadcast;
 
 app.prepare().then(() => {
   const server = createServer((req, res) => {
+    // Route handlers (App Router) have no direct access to the raw socket,
+    // so the real client IP is stamped on as a header here -- used by
+    // src/lib/rate-limit.ts to key its per-IP buckets. Always overwritten
+    // (never trusts an incoming x-forwarded-for), since there's no reverse
+    // proxy in front of this server to have set it legitimately -- letting
+    // a client set its own would make the rate limiter trivially bypassable.
+    req.headers["x-forwarded-for"] = req.socket.remoteAddress || "unknown";
     handle(req, res);
   });
 
@@ -86,7 +98,8 @@ app.prepare().then(() => {
     }, HEARTBEAT_INTERVAL_MS);
   }
 
-  server.listen(port, () => {
+  server.listen(port, hostname, () => {
     console.log(`> Ready on http://localhost:${port} (ws endpoint: /ws)`);
+    console.log(`> Also reachable on your LAN at http://<this-machine-IP>:${port}`);
   });
 });

@@ -9,11 +9,17 @@ import {
   SESSION_COOKIE_MAX_AGE_DEFAULT,
   SESSION_COOKIE_SECURE,
 } from "@/lib/session";
+import { rateLimit } from "@/lib/rate-limit";
 
 const SALT_ROUNDS = 10;
 const MIN_PASSWORD_LENGTH = 8;
 
 export async function POST(req: Request) {
+  // Signup is unauthenticated by nature -- limit mass account creation.
+  // 5 accounts / hour per IP.
+  const limited = rateLimit(req, "sender-register", 5, 60 * 60 * 1000);
+  if (limited) return limited;
+
   await initDb();
   const body = await req.json().catch(() => ({}));
   const { name: rawName, username: rawUsername, password: rawPassword, rememberMe } =
