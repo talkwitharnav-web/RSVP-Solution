@@ -1,5 +1,14 @@
 import type { Metadata } from "next";
-import { Bricolage_Grotesque, Plus_Jakarta_Sans } from "next/font/google";
+import {
+  Bricolage_Grotesque,
+  Plus_Jakarta_Sans,
+  Playfair_Display,
+  Inter,
+  Merriweather,
+  Open_Sans,
+  Yellowtail,
+  Lato,
+} from "next/font/google";
 import { GlobalSettingsToggles } from "@/components/ui/GlobalSettingsToggles";
 import "./globals.css";
 
@@ -12,6 +21,19 @@ const plusJakarta = Plus_Jakarta_Sans({
   variable: "--font-body",
   subsets: ["latin"],
 });
+
+// Curated font-pair presets for the "designed_template" invitation designer
+// (src/lib/design-fonts.ts) -- next/font/google resolves and subsets fonts
+// at build time, so a sender can't type in an arbitrary Google Font name at
+// runtime (see "custom rsvp card designer.md" section 4); these are the
+// fixed pairs they pick from instead, each statically imported here exactly
+// like the app's own two fonts above.
+const playfairDisplay = Playfair_Display({ variable: "--font-design-editorial-display", subsets: ["latin"] });
+const interFont = Inter({ variable: "--font-design-editorial-body", subsets: ["latin"] });
+const merriweather = Merriweather({ variable: "--font-design-classic-display", subsets: ["latin"], weight: ["700"] });
+const openSans = Open_Sans({ variable: "--font-design-classic-body", subsets: ["latin"] });
+const yellowtail = Yellowtail({ variable: "--font-design-playful-display", subsets: ["latin"], weight: "400" });
+const lato = Lato({ variable: "--font-design-playful-body", subsets: ["latin"], weight: ["400", "700"] });
 
 export const metadata: Metadata = {
   title: "RSVP",
@@ -61,7 +83,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${bricolage.variable} ${plusJakarta.variable} h-full antialiased`}
+      className={`${bricolage.variable} ${plusJakarta.variable} ${playfairDisplay.variable} ${interFont.variable} ${merriweather.variable} ${openSans.variable} ${yellowtail.variable} ${lato.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <head>

@@ -28,7 +28,7 @@ async function migrate(): Promise<void> {
     CREATE TABLE IF NOT EXISTS events (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       slug TEXT NOT NULL UNIQUE,
-      kind TEXT NOT NULL CHECK (kind IN ('external_link', 'hosted_template', 'custom_card')),
+      kind TEXT NOT NULL CHECK (kind IN ('external_link', 'hosted_template', 'custom_card', 'designed_template')),
       title TEXT NOT NULL,
       host_name TEXT,
       description TEXT,
@@ -54,8 +54,14 @@ async function migrate(): Promise<void> {
   // "constraint already exists" when both tried to ADD it back.
   await pool.query(`
     ALTER TABLE events DROP CONSTRAINT IF EXISTS events_kind_check;
-    ALTER TABLE events ADD CONSTRAINT events_kind_check CHECK (kind IN ('external_link', 'hosted_template', 'custom_card'));
+    ALTER TABLE events ADD CONSTRAINT events_kind_check CHECK (kind IN ('external_link', 'hosted_template', 'custom_card', 'designed_template'));
   `);
+
+  // design_config: the sender's template/palette/font/icon choices + any
+  // slot drag/resize overrides for a 'designed_template' event -- see
+  // src/lib/design-types.ts and "custom rsvp card designer.md" section 7.
+  // NULL for every other EventKind.
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS design_config JSONB;`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS rsvps (

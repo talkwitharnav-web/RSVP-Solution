@@ -16,6 +16,7 @@ export async function GET() {
   let dbLatencyMs: number | null = null;
   let dbError: string | null = null;
   let dbSizeBytes: number | null = null;
+  let imageStorageBytes: number | null = null;
 
   try {
     await pool.query("SELECT 1");
@@ -24,6 +25,18 @@ export async function GET() {
       "SELECT pg_database_size(current_database())::text AS size",
     );
     dbSizeBytes = Number(sizeResult.rows[0]?.size ?? null) || null;
+
+    // card_image_url stores images as base64 data URLs (see "Image uploads"
+    // in SYSTEM_MEMORY.md) -- there's no separate blob store, so "how much
+    // storage do images take up" is just the summed byte length of that
+    // column. octet_length on the text column measures the data URL's
+    // encoded size (including the base64 overhead and the "data:...;base64,"
+    // prefix), not the decoded image size -- close enough for a storage
+    // dashboard, and avoids decoding every image on every health check.
+    const imageSizeResult = await pool.query<{ size: string | null }>(
+      "SELECT SUM(octet_length(card_image_url))::text AS size FROM events WHERE card_image_url IS NOT NULL",
+    );
+    imageStorageBytes = Number(imageSizeResult.rows[0]?.size ?? null) || 0;
   } catch (err) {
     dbError = err instanceof Error ? err.message : "Unknown DB error";
   }
@@ -49,6 +62,7 @@ export async function GET() {
       latencyMs: dbLatencyMs,
       error: dbError,
       sizeBytes: dbSizeBytes,
+      imageStorageBytes,
       pool: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
     },
     ws: {

@@ -10,6 +10,7 @@ type HealthResponse = {
     connected: boolean;
     latencyMs: number | null;
     sizeBytes: number | null;
+    imageStorageBytes: number | null;
     pool: { total: number; idle: number; waiting: number } | null;
   };
   ws: { connectedClients: number | null };
@@ -207,6 +208,14 @@ export function HealthPin({
                 <div className="flex justify-between gap-3">
                   <dt className="text-[var(--color-text-muted)]">DB size</dt>
                   <dd className="text-[var(--color-text-primary)] font-medium">{formatBytes(health.db.sizeBytes)}</dd>
+                </div>
+              )}
+              {showDbSize && health.db.imageStorageBytes != null && (
+                <div className="flex justify-between gap-3">
+                  <dt className="text-[var(--color-text-muted)]">Image storage</dt>
+                  <dd className="text-[var(--color-text-primary)] font-medium">
+                    {formatBytes(health.db.imageStorageBytes)}
+                  </dd>
                 </div>
               )}
               {detailLevel === "full" && health.db.pool && (

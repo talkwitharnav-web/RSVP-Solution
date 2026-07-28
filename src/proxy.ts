@@ -12,10 +12,10 @@ import { isLocalhostIp, clientIpFromHeaders } from "@/lib/network";
 // [slug], which shares a path with public GET/PUT on the same route --
 // that one case is covered separately by the same isLocalhostIp() check
 // inside requireAdmin() itself (src/lib/auth.ts), so every admin-gated call
-// site is covered either by this middleware or by the auth helper.
+// site is covered either by this proxy or by the auth helper.
 const ADMIN_ONLY_PREFIXES = ["/admin", "/api/admin", "/api/dev", "/api/users"];
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const isAdminGateway = pathname === "/";
   const isAdminPrefixed = ADMIN_ONLY_PREFIXES.some(

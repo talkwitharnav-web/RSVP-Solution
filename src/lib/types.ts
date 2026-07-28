@@ -1,4 +1,6 @@
-export type EventKind = "external_link" | "hosted_template" | "custom_card";
+import type { DesignConfig } from "./design-types";
+
+export type EventKind = "external_link" | "hosted_template" | "custom_card" | "designed_template";
 
 export interface RsvpQuestion {
   id: string;
@@ -19,6 +21,7 @@ export interface EventRecord {
   external_url: string | null;
   questions: RsvpQuestion[];
   card_image_url: string | null;
+  design_config: DesignConfig | null;
   created_by: string | null;
   guest_categories: string[];
   published: boolean;

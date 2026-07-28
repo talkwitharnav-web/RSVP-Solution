@@ -1,10 +1,20 @@
-# Custom RSVP Card Designer — Research
+# Custom RSVP Card Designer — Research & Build
 
-Research-only doc for the "Design in our editor" flow — the disabled/coming-soon
-option in `NewInvitationModal.tsx`, sitting alongside `custom_card` (bring-your-own-image,
-already built) as the second `EventKind` this project always intended to add. Nothing
-in this doc has been implemented; it's the research pass that `SYSTEM_MEMORY.md`'s
-"Next Likely Steps" flags as needed before that build starts.
+Doc for the "Design in our editor" flow — the disabled/coming-soon option in
+`NewInvitationModal.tsx`, sitting alongside `custom_card` (bring-your-own-image,
+already built) as the second `EventKind` this project always intended to add.
+Sections 1–5 are the original research pass (2026-07-27, no implementation).
+Section 7 (added same day, later in the session) is the actual approach being
+built — a middle ground between Approach A (freeform canvas) and Approach B
+(pure template+CSS swap) that the user asked for after reading this doc.
+
+## 0. Status
+
+**Built and working end-to-end** (2026-07-27). See section 7 for the chosen
+approach, section 8 for the build checklist (all core items complete), and
+section 9 for the UI-shape correction made partway through the build.
+Sections 1–6 remain as original research context — don't edit those to
+match final decisions; section 7 supersedes them where they differ.
 
 ## 1. How other products approach this
 
@@ -251,4 +261,216 @@ rehydration.
 6. `GuestEventView` gains a render branch for this new kind, the same way it
    already branches on `external_link` vs. hosted rendering.
 
-None of this has been started. This doc is research/options only.
+None of this was implemented at the time this was written — see section 7
+below for what actually got built.
+
+## 7. Chosen approach — "template-constrained canvas" (the middle ground)
+
+After reading sections 1–6, the user asked for a mix of Approach A (freeform
+canvas) and Approach B (template + CSS swap). The agreed middle ground:
+
+**Still start from a template** (no blank page — matches every commercial
+product researched in section 1) **but a handful of specific elements on that
+template become draggable/resizable within guardrails**, instead of the
+template being a fully locked arrangement. Not true freeform placement —
+bounded to a safe area, limited to repositioning/resizing existing named
+slots (title, subtitle, photo, icon), not adding/deleting/rotating/layering
+arbitrary new elements. This keeps the data model small (an offsets object,
+not a scene graph) while giving real "make it feel like mine" flexibility
+that pure Approach B doesn't offer.
+
+### Library decision: hand-rolled, not a new dependency
+
+Researched three real options for the drag/resize interaction itself:
+
+| Option | Verdict |
+|---|---|
+| **react-moveable** | Full-featured (drag/resize/rotate/warp/snap) but last published ~3 years ago with no confirmed React 19 support — a real compatibility risk against this project's React 19 / Next 16 stack, and most of its feature surface (rotate, warp, pinch, group) is unneeded here. |
+| **@dnd-kit/react** | Actively maintained, explicit React 19 support (peer dep `react ^18 \|\| ^19`) — but dnd-kit's whole model is built around sortable lists / drag-between-containers, not free x/y positioning + resize of a single element. Would fight the library more than use it for this specific job. |
+| **react-rnd** | Confirmed via `npm info`: v10.5.3, peer dep `react: >=16.3.0` (no React 19 friction at all), does exactly drag + resize + bounds and nothing else. **Chosen.** |
+
+Installed instead of hand-rolling pointer-event math from scratch, since
+`react-rnd`'s peer dependency is permissive and its scope maps 1:1 onto what
+this feature actually needs (bounded drag + resize, nothing more) — no
+rotate/warp/pinch code to maintain that a hand-rolled version would also
+have needed to explicitly *not* build.
+
+### Data model
+
+One new `EventKind`: `"designed_template"`. One new JSONB column on `events`,
+`design_config`, rather than four separate columns — keeps the migration to
+a single `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` (matching this project's
+existing idempotent-migration pattern in `src/lib/db.ts`) and matches how
+`questions`/`guest_categories` already use JSONB for structured-but-flexible
+per-event data on this same table.
+
+```ts
+type DesignConfig = {
+  templateId: string;   // which layout template (src/lib/design-templates.ts)
+  paletteId: string;    // which color palette (src/lib/design-palettes.ts)
+  fontPairId: string;   // which font pairing (src/lib/design-fonts.ts)
+  iconId: string | null; // optional decorative lucide icon (src/lib/design-icons.ts)
+  slots: Record<string, { x: number; y: number; scale: number }>;
+  // x/y are percentages (0-100) of the card's own bounding box, not pixels --
+  // keeps the same design_config valid at any render size (editor vs. guest
+  // page vs. a future share-image export) without recalculating anything.
+  // scale is a multiplier off each slot's own default size (1 = default).
+};
+```
+
+Each template defines its own fixed set of slot IDs and each slot's default
+`{x, y, scale}` plus a bounding safe-area — the sender's edits are stored as
+*overrides* layered on top of those defaults, not a full replacement, so a
+slot the sender never touched still renders correctly from the template's
+own defaults alone.
+
+### Registries (all small, fixed, in-code — not user-authorable lists)
+
+- **Templates** (`src/lib/design-templates.ts`): 2–3 layout shapes to start
+  (a centered stack, a photo-optional hero-plus-text, a stationery-style
+  bordered card), each a real React component plus a slot-defaults object.
+- **Palettes** (`src/lib/design-palettes.ts`): a handful of curated
+  accent/background/text combinations, hand-verified against the same
+  WCAG-contrast bar `theme.md` already documents for the app's own palette
+  (the `dataviz` skill's validator script isn't vendored into this repo, so
+  rather than depending on invoking that skill mid-build, palettes are
+  checked by the same manual contrast-math approach `theme.md` itself used).
+- **Font pairs** (`src/lib/design-fonts.ts`): a handful of `next/font/google`
+  pairs imported statically in `layout.tsx` (per section 4's finding that
+  runtime-arbitrary font loading isn't supported), each exposed as its own
+  CSS variable pair.
+- **Icons** (`src/lib/design-icons.ts`): a curated subset of the
+  `lucide-react` icons already inventoried in section 4 — no new install.
+
+### What's genuinely different from section 6's original build-shape sketch
+
+Section 6 (Approach B only) assumed a picker-only UI with no drag surface at
+all. The actual build adds one more piece: a `SlotEditor` component
+(`react-rnd` instances, one per template slot, bounded to the template's
+declared safe-area) that sits in the creation/edit flow between "pick a
+template" and "fill in the text fields" — everything else in section 6
+(registries, `design_config` persistence, a `GuestEventView` render branch)
+carries over unchanged in spirit, just with `design_config.slots` added to
+what gets saved.
+
+## 8. Build checklist
+
+Tracked live here so the work can be picked up across sessions without
+re-deriving the plan. Check items off as they land; add a one-line note only
+if something changed from the plan above (not a full diary).
+
+- [x] Install `react-rnd`
+- [x] `src/lib/design-templates.ts` — 3 templates (Centered Stack, Photo
+      Hero, Stationery Frame), each with slot defaults + safe-area bounds
+- [x] `src/lib/design-palettes.ts` — 4 curated palettes (Garden, Celebration,
+      Elegant Evening, Classic), each pair hand-verified at ≥4.5:1 WCAG
+      contrast via a one-off script (relative-luminance contrast math, same
+      standard `theme.md` holds the app's own palette to)
+- [x] `src/lib/design-fonts.ts` — 4 curated font pairs (Signature/this app's
+      own fonts, Editorial, Classic, Playful), static `next/font/google`
+      imports wired into `layout.tsx`
+- [x] `src/lib/design-icons.ts` — 8 curated `lucide-react` icons (party
+      popper, sparkles, flower, moon & star, heart, cake, wine, snowflake)
+- [x] DB migration: `events.design_config JSONB`, `kind` CHECK constraint
+      gains `'designed_template'`
+- [x] `SlotEditor` component (`react-rnd`-based, bounded drag/resize per
+      slot) + `DesignedCardContent` (the shared read-only render both the
+      editor and the guest page use, so they can't visually drift)
+- [x] Template picker + palette/font/icon picker UI — **not** wired into
+      `NewInvitationModal` as originally planned; see section 9, it's a
+      dedicated page instead
+- [x] `POST /api/events` accepts `designed_template` kind + `design_config`
+      (server-side `sanitizeDesignConfig` validates/clamps against the fixed
+      registries + numeric bounds, same defense-in-depth pattern as the RSVP
+      category-count clamp)
+- [x] `PUT /api/events/[slug]` accepts `design_config` edits (same
+      ownership-gated pattern as other event edits, re-validated through the
+      same sanitizer rather than trusted as already-valid)
+- [x] `GuestEventView` render branch for `designed_template`
+- [x] `EventEditor` support for re-opening/adjusting an existing designed
+      card (reuses `SlotEditor`, palette/font/icon pickers inline in the
+      existing edit form)
+- [x] End-to-end verification in browser: created a designed-template
+      invitation (headless Chrome, real drag simulated via CDP mouse
+      events), confirmed `design_config` persisted correctly to Postgres,
+      published it, and confirmed the guest-facing `/receiver/[slug]` page
+      rendered the identical card (same dragged title position, same
+      palette/font) with the RSVP form still working below it.
+- [x] `npx tsc --noEmit` / `npx eslint .` clean
+- [ ] `SYSTEM_MEMORY.md` / `CLAUDE.md` updated once the feature is stable
+      (in progress as of this doc update)
+
+## 9. Mid-build UI correction: dedicated page, not a modal step
+
+Section 7/8 originally planned this as a third step inside
+`NewInvitationModal` (template → style → content, all within the existing
+modal), matching how `BringYourOwnCardForm` works. That version was fully
+built and working, but the user stopped it explicitly: **"i don't like how
+we're making the custom rsvp. it should have a dedicated page with sidebar
+options and the entire thing visible in the right, like canva."**
+
+Reworked to `/create/design`, a real full-page route (not a modal) —
+navigated to from the New Invitation modal's "Design in our editor" button
+instead of opening a modal step. Layout: a fixed-width left sidebar with
+three tabs (Templates / Style / Content, chosen over one long scrolling
+panel per direct question to the user) and the live card canvas filling the
+entire right side of the viewport, matching a Canva-style workspace rather
+than a wizard-in-a-box. The underlying template-constrained-canvas
+mechanism (registries, `SlotEditor`, `design_config` shape, sanitization) is
+unchanged from section 7 — only the chrome around it changed. The
+modal-step version (`DesignInEditorForm.tsx`) was deleted rather than kept
+as a second entry point, to avoid two divergent ways to reach the same
+feature.
+
+Also renamed `src/middleware.ts` → `src/proxy.ts` during this same session
+(unrelated to the designer itself) — Next.js 16 deprecated the
+`middleware.ts` convention in favor of `proxy.ts` for the same
+request-interception mechanism the localhost-only admin gate uses (see
+`SYSTEM_MEMORY.md`'s "Localhost-only admin gate"). Confirmed the rename
+didn't change behavior (same localhost-only gating verified from both
+localhost and the real LAN IP after the rename) and that this project's
+security posture already matched Next's own stated reasoning for the
+rename — the proxy layer here only does an IP check, never session/auth
+verification, which stays in route handlers as it always did.
+
+## 10. Known limitation — feels bare-bones, needs occasion presets (flagged 2026-07-27, not yet actioned)
+
+User feedback right after the build landed: **"our editor is highly bare
+bones, i have no idea why it is the way it is but it lacks so much detail
+and so much personality and stuff and we should develop presets for the
+occasions as well."** Noted here as a real gap, not fixed yet — a to-do for
+the next pass on this feature, not this session's build.
+
+Best read of "why it is the way it is": sections 7/8 deliberately scoped
+this first version down to the smallest thing that could prove the
+mechanism (drag/resize within guardrails, persisted, rendered identically
+for sender and guest) — same staged-scope philosophy as every other feature
+in this project. That means the *plumbing* is real (registries, sanitizer,
+shared render, live drag) but the *content* of those registries is
+intentionally thin: 3 generic layout shapes, 4 palettes, 4 font pairs, 8
+icons, none of it organized around an actual occasion. There's no
+personality layer at all yet — no per-occasion decorative motifs, no
+layout/palette/font bundled together as a single one-click "vibe," nothing
+like the reference project's own "Bistro Glaze" treatment that this
+project's `CLAUDE.md` has flagged more than once as something to develop an
+equivalent of later, just not by copying it outright.
+
+Concretely, what "occasion presets" likely means (not decided, just the
+obvious shape given how registries already work): a fifth registry,
+`design-presets.ts`, where a preset is a named bundle —
+`{name: "Birthday", templateId, paletteId, fontPairId, iconId}` (e.g.
+"Birthday" → Photo Hero + Celebration + Playful + Cake/PartyPopper,
+"Wedding" → Stationery Frame + Elegant Evening + Editorial +
+Heart/MoonStar, "Garden Party" → Centered Stack + Garden + Classic +
+Flower). The Templates tab in `/create/design` would offer presets as the
+primary picker (one click = template + palette + font + icon all set
+correctly for that vibe), with the current three separate
+Templates/Style/Content tabs demoted to "customize further" rather than the
+only way in — closer to how Greetings Island/Partiful actually work per
+section 1's research (pick a themed starting point, not assemble the
+pieces yourself). Would need more raw material too: more than 3 layout
+templates and more than 4 palette/font options for presets to feel
+genuinely differentiated rather than the same handful of parts relabeled.
+
+Not scoped or started. Revisit this section before the next pass on the
+designer.

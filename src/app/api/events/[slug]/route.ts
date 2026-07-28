@@ -4,6 +4,11 @@ import { requireAdmin, requireSender } from "@/lib/auth";
 import { broadcastDbChanged } from "@/lib/ws-broadcast";
 import { isAcceptedImageDataUrl } from "@/lib/image-upload";
 import { parseGuestCategories } from "@/lib/guest-categories";
+import { sanitizeDesignConfig } from "@/lib/design-types";
+import { DESIGN_TEMPLATES } from "@/lib/design-templates";
+import { DESIGN_PALETTES } from "@/lib/design-palettes";
+import { DESIGN_FONT_PAIRS } from "@/lib/design-fonts";
+import { DESIGN_ICONS } from "@/lib/design-icons";
 
 export async function GET(
   _req: NextRequest,
@@ -76,6 +81,26 @@ export async function PUT(
       ? parseGuestCategories(String(body.guestCategories ?? ""))
       : event.guest_categories;
 
+  // design_config edits apply only to designed_template events -- undefined
+  // means the editor didn't touch it, same "don't clobber on partial save"
+  // rule as guestCategories above. Re-validated through the same sanitizer
+  // as creation (not trusted as already-valid just because it round-tripped
+  // from this same app), since a direct API call could send anything.
+  let designConfig = event.design_config;
+  if (event.kind === "designed_template" && body.designConfig !== undefined) {
+    const sanitized = sanitizeDesignConfig(
+      body.designConfig,
+      DESIGN_TEMPLATES.map((t) => t.id),
+      DESIGN_PALETTES.map((p) => p.id),
+      DESIGN_FONT_PAIRS.map((f) => f.id),
+      DESIGN_ICONS.map((i) => i.id),
+    );
+    if (!sanitized) {
+      return NextResponse.json({ error: "Invalid design configuration" }, { status: 400 });
+    }
+    designConfig = sanitized;
+  }
+
   // Publishing only ever goes false -> true through this route -- an
   // ordinary content save (handleSave in EventEditor) never sends
   // `published` at all, so the existing value is kept; explicitly sending
@@ -86,8 +111,8 @@ export async function PUT(
 
   const result = await pool.query(
     `UPDATE events
-     SET title = $1, host_name = $2, description = $3, event_date = $4, location = $5, card_image_url = $6, guest_categories = $7, published = $8
-     WHERE slug = $9
+     SET title = $1, host_name = $2, description = $3, event_date = $4, location = $5, card_image_url = $6, guest_categories = $7, published = $8, design_config = $9
+     WHERE slug = $10
      RETURNING *`,
     [
       title,
@@ -98,6 +123,7 @@ export async function PUT(
       cardImageUrl,
       JSON.stringify(guestCategories),
       published,
+      designConfig ? JSON.stringify(designConfig) : null,
       slug,
     ],
   );

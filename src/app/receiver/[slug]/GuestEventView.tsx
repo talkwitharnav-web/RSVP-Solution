@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useWebSocket } from "@/lib/useWebSocket";
 import type { EventRecord } from "@/lib/types";
+import { DesignedCardContent } from "@/components/design/DesignedCardContent";
 import RsvpForm from "./RsvpForm";
 
 /**
@@ -40,22 +41,36 @@ export default function GuestEventView({ initialEvent }: { initialEvent: EventRe
       className="mx-auto flex w-full flex-1 flex-col justify-center gap-6 sm:gap-8 px-6 py-16"
       style={{ maxWidth: "clamp(24rem, 60vw, 40rem)" }}
     >
-      <div className="flex flex-col gap-2">
-        <h1
-          className="font-display font-semibold text-[var(--color-text-primary)]"
-          style={{ fontSize: "clamp(1.75rem, 1.3rem + 1.5vw, 2.75rem)" }}
-        >
-          {event.title}
-        </h1>
-        {event.host_name && (
-          <p className="text-base text-[var(--color-text-muted)]">Hosted by {event.host_name}</p>
-        )}
-        {event.description && <p className="text-base text-[var(--color-text-primary)]">{event.description}</p>}
-        {event.event_date && (
-          <p className="text-base text-[var(--color-text-muted)]">{new Date(event.event_date).toLocaleString()}</p>
-        )}
-        {event.location && <p className="text-base text-[var(--color-text-muted)]">{event.location}</p>}
-      </div>
+      {event.kind === "designed_template" && event.design_config ? (
+        <DesignedCardContent
+          config={event.design_config}
+          fields={{
+            title: event.title,
+            hostName: event.host_name,
+            description: event.description,
+            eventDate: event.event_date,
+            location: event.location,
+            cardImageUrl: event.card_image_url,
+          }}
+        />
+      ) : (
+        <div className="flex flex-col gap-2">
+          <h1
+            className="font-display font-semibold text-[var(--color-text-primary)]"
+            style={{ fontSize: "clamp(1.75rem, 1.3rem + 1.5vw, 2.75rem)" }}
+          >
+            {event.title}
+          </h1>
+          {event.host_name && (
+            <p className="text-base text-[var(--color-text-muted)]">Hosted by {event.host_name}</p>
+          )}
+          {event.description && <p className="text-base text-[var(--color-text-primary)]">{event.description}</p>}
+          {event.event_date && (
+            <p className="text-base text-[var(--color-text-muted)]">{new Date(event.event_date).toLocaleString()}</p>
+          )}
+          {event.location && <p className="text-base text-[var(--color-text-muted)]">{event.location}</p>}
+        </div>
+      )}
 
       {event.kind === "custom_card" && event.card_image_url && (
         // eslint-disable-next-line @next/next/no-img-element -- user-uploaded data URL, not an optimizable static asset

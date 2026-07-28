@@ -11,9 +11,11 @@ interface ModalProps {
   onClose: () => void;
   children: ReactNode;
   danger?: boolean;
+  /** "md" (default, max-w-md) or "lg" (max-w-2xl) -- lg is for content that genuinely needs more room, e.g. a two-column form + live preview. */
+  size?: "md" | "lg";
 }
 
-export const Modal: FC<ModalProps> = ({ isOpen, title, onClose, children, danger = false }) => {
+export const Modal: FC<ModalProps> = ({ isOpen, title, onClose, children, danger = false, size = "md" }) => {
   const panelRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
@@ -105,7 +107,7 @@ export const Modal: FC<ModalProps> = ({ isOpen, title, onClose, children, danger
         onClick={(e) => e.stopPropagation()}
         className={`bg-[var(--color-surface-1)] border ${
           danger ? "border-[var(--color-danger)]" : "border-[var(--color-border-strong)]"
-        } rounded-[var(--radius-md)] shadow-xl p-6 w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto ${panelClass}`}
+        } rounded-[var(--radius-md)] shadow-xl p-6 w-full ${size === "lg" ? "max-w-2xl" : "max-w-md"} max-h-[calc(100dvh-2rem)] overflow-y-auto ${panelClass}`}
       >
         <h2
           id="modal-title"

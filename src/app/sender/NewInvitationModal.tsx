@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Palette, ImageUp } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
@@ -9,6 +10,7 @@ import { BringYourOwnCardForm } from "./BringYourOwnCardForm";
 type Step = "choice" | "byo";
 
 export function NewInvitationModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const router = useRouter();
   const [step, setStep] = useState<Step>("choice");
 
   const handleClose = () => {
@@ -24,13 +26,15 @@ export function NewInvitationModal({ isOpen, onClose }: { isOpen: boolean; onClo
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <button
             type="button"
-            disabled
-            title="Coming soon"
-            className="flex flex-col items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border-strong)] bg-[var(--color-surface-2)] p-5 text-center opacity-60 cursor-not-allowed"
+            onClick={() => {
+              handleClose();
+              router.push("/create/design");
+            }}
+            className="flex flex-col items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border-strong)] bg-[var(--color-surface-2)] p-5 text-center transition-colors hover:bg-[var(--color-border-strong)]"
           >
             <Palette className="h-8 w-8 text-[var(--color-accent-sage)]" strokeWidth={1.5} />
             <span className="font-semibold text-[var(--color-text-primary)]">Design in our editor</span>
-            <span className="text-xs text-[var(--color-text-muted)]">Coming soon</span>
+            <span className="text-xs text-[var(--color-text-muted)]">Pick a template, then drag it into shape</span>
           </button>
           <button
             type="button"

@@ -9,6 +9,13 @@ import { Card } from "@/components/ui/Card";
 import { CopyableValue } from "@/components/ui/CopyableValue";
 import { isAcceptedImageType, isHeicFile, convertHeicToJpeg } from "@/lib/image-upload";
 import { formatGuestCategories } from "@/lib/guest-categories";
+import { DESIGN_PALETTES } from "@/lib/design-palettes";
+import { DESIGN_FONT_PAIRS } from "@/lib/design-fonts";
+import { DESIGN_ICONS } from "@/lib/design-icons";
+import { getDesignTemplate } from "@/lib/design-templates";
+import type { DesignConfig, SlotOffset } from "@/lib/design-types";
+import type { DesignedCardFields } from "@/components/design/DesignedCardContent";
+import { SlotEditor } from "@/components/design/SlotEditor";
 import type { EventRecord } from "@/lib/types";
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -47,6 +54,10 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
   const [guestCategoriesText, setGuestCategoriesText] = useState(formatGuestCategories(initialEvent.guest_categories));
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(initialEvent.card_image_url);
+  const [paletteId, setPaletteId] = useState(initialEvent.design_config?.paletteId ?? DESIGN_PALETTES[0].id);
+  const [fontPairId, setFontPairId] = useState(initialEvent.design_config?.fontPairId ?? DESIGN_FONT_PAIRS[0].id);
+  const [iconId, setIconId] = useState<string | null>(initialEvent.design_config?.iconId ?? null);
+  const [slots, setSlots] = useState<Record<string, SlotOffset>>(initialEvent.design_config?.slots ?? {});
   const [convertingHeic, setConvertingHeic] = useState(false);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -94,6 +105,11 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
     setImagePreview(dataUrl);
   };
 
+  const designConfig: DesignConfig | null =
+    event.kind === "designed_template" && event.design_config
+      ? { templateId: event.design_config.templateId, paletteId, fontPairId, iconId, slots }
+      : null;
+
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -111,6 +127,7 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
           location: location || null,
           guestCategories: guestCategoriesText,
           ...(imageDataUrl ? { cardImageUrl: imageDataUrl } : {}),
+          ...(designConfig ? { designConfig } : {}),
         }),
       });
       const data = await res.json();
@@ -260,6 +277,124 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
               className="w-full px-4 py-3 text-base bg-[var(--color-surface-0)] text-[var(--color-text-primary)] border border-[var(--color-border-strong)] rounded-[var(--radius-sm)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-coral-text)] focus:border-[var(--color-accent-coral-text)] transition-colors"
             />
           </div>
+
+          {event.kind === "designed_template" && event.design_config && (
+            <div className="space-y-4 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
+              <div>
+                <Label>Color palette</Label>
+                <div className="grid grid-cols-4 gap-2">
+                  {DESIGN_PALETTES.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setPaletteId(p.id)}
+                      title={p.name}
+                      className={`flex h-8 overflow-hidden rounded-[var(--radius-sm)] border-2 ${
+                        paletteId === p.id ? "border-[var(--color-accent-coral-text)]" : "border-transparent"
+                      }`}
+                      style={{ backgroundColor: p.background }}
+                    >
+                      <span className="ml-auto h-full w-3" style={{ backgroundColor: p.accent }} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <Label>Font pairing</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {DESIGN_FONT_PAIRS.map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setFontPairId(f.id)}
+                      className={`rounded-[var(--radius-sm)] border-2 px-3 py-1.5 text-left text-sm transition-colors ${
+                        fontPairId === f.id ? "border-[var(--color-accent-coral-text)]" : "border-[var(--color-border-strong)]"
+                      }`}
+                      style={{ fontFamily: f.displayVar }}
+                    >
+                      {f.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <Label>Decorative icon</Label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIconId(null)}
+                    className={`flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] border-2 text-[0.65rem] ${
+                      iconId === null ? "border-[var(--color-accent-coral-text)]" : "border-[var(--color-border-strong)]"
+                    }`}
+                  >
+                    None
+                  </button>
+                  {DESIGN_ICONS.map(({ id, name, Icon }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setIconId(id)}
+                      title={name}
+                      className={`flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] border-2 ${
+                        iconId === id ? "border-[var(--color-accent-coral-text)]" : "border-[var(--color-border-strong)]"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4 text-[var(--color-text-primary)]" strokeWidth={1.75} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {"photo" in getDesignTemplate(event.design_config.templateId).slots && (
+                <div>
+                  <Label htmlFor="card-image">Photo</Label>
+                  <label
+                    htmlFor="card-image"
+                    className="flex flex-col items-center justify-center gap-1.5 rounded-[var(--radius-sm)] border-2 border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface-0)] p-3 cursor-pointer hover:border-[var(--color-accent-coral-text)] transition-colors"
+                  >
+                    {convertingHeic ? (
+                      <span className="text-sm text-[var(--color-text-muted)]">Converting HEIC photo...</span>
+                    ) : imagePreview ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- data URL / uploaded image, not an optimizable static asset
+                      <img src={imagePreview} alt="Card photo preview" className="max-h-32 rounded-[var(--radius-sm)] object-contain" />
+                    ) : (
+                      <>
+                        <ImagePlus className="h-6 w-6 text-[var(--color-text-muted)]" strokeWidth={1.5} />
+                        <span className="text-xs text-[var(--color-text-muted)]">Click to change photo</span>
+                      </>
+                    )}
+                  </label>
+                  <input
+                    id="card-image"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/heic,image/heif,.heic,.heif"
+                    onChange={handleImageChange}
+                    className="sr-only"
+                  />
+                </div>
+              )}
+
+              <div>
+                <Label>Layout — drag or resize any element</Label>
+                <SlotEditor
+                  config={designConfig!}
+                  fields={
+                    {
+                      title,
+                      hostName: hostName || null,
+                      description: description || null,
+                      eventDate: eventDate ? new Date(eventDate).toISOString() : null,
+                      location: location || null,
+                      cardImageUrl: imagePreview,
+                    } satisfies DesignedCardFields
+                  }
+                  onSlotChange={(slotId, offset) => setSlots((prev) => ({ ...prev, [slotId]: offset }))}
+                />
+              </div>
+            </div>
+          )}
 
           {event.kind !== "external_link" && (
             <div>
