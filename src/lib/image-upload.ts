@@ -51,6 +51,23 @@ export function isAcceptedImageDataUrl(dataUrl: string): boolean {
   return (ACCEPTED_IMAGE_TYPES as readonly string[]).includes(match[1].toLowerCase());
 }
 
+/**
+ * The upload forms (BringYourOwnCardForm, EventEditor) already cap file
+ * size client-side at 5MB before ever base64-encoding it, but that's a UX
+ * nicety only -- a direct API call bypasses the picker entirely and could
+ * otherwise submit an arbitrarily large data URL straight into a JSONB
+ * column with no size check at all. This is the actual server-side
+ * enforcement point. Base64 inflates the original byte size by ~4/3, so the
+ * data URL string itself is checked against that inflated bound rather than
+ * re-decoding it just to measure.
+ */
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_DATA_URL_LENGTH = Math.ceil((MAX_IMAGE_BYTES * 4) / 3) + 100;
+
+export function isAcceptedImageDataUrlSize(dataUrl: string): boolean {
+  return dataUrl.length <= MAX_IMAGE_DATA_URL_LENGTH;
+}
+
 /** Converts a HEIC/HEIF file to a JPEG File client-side via heic2any (no native browser API decodes HEIC). */
 export async function convertHeicToJpeg(file: File): Promise<File> {
   const heic2any = (await import("heic2any")).default;

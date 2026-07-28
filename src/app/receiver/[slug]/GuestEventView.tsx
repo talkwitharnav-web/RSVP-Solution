@@ -6,6 +6,20 @@ import type { EventRecord } from "@/lib/types";
 import { DesignedCardContent } from "@/components/design/DesignedCardContent";
 import RsvpForm from "./RsvpForm";
 
+// Defense in depth alongside the server-side check in POST /api/events --
+// only ever render an external RSVP link if it's actually http(s), so a
+// pre-existing bad value (from before that check existed, or a direct DB
+// edit) can't execute as javascript: in a guest's browser on click.
+function isSafeExternalUrl(url: string | null): url is string {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The plain guest-facing view -- no owner chrome, no edit affordances.
  * Subscribes to the same `db-changed` broadcast the Access DB page uses
@@ -82,14 +96,20 @@ export default function GuestEventView({ initialEvent }: { initialEvent: EventRe
       )}
 
       {event.kind === "external_link" ? (
-        <a
-          href={event.external_url ?? "#"}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="rounded-[var(--radius-full)] bg-[var(--color-accent-coral-text)] px-6 py-3.5 text-center text-base font-semibold text-[var(--color-on-coral)] transition-opacity hover:opacity-90"
-        >
-          RSVP now
-        </a>
+        isSafeExternalUrl(event.external_url) ? (
+          <a
+            href={event.external_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-[var(--radius-full)] bg-[var(--color-accent-coral-text)] px-6 py-3.5 text-center text-base font-semibold text-[var(--color-on-coral)] transition-opacity hover:opacity-90"
+          >
+            RSVP now
+          </a>
+        ) : (
+          <p className="text-center text-sm text-[var(--color-danger)]">
+            This invitation&apos;s RSVP link isn&apos;t valid — please contact the host.
+          </p>
+        )
       ) : (
         <RsvpForm
           // Keying on the category list forces a clean remount (fresh

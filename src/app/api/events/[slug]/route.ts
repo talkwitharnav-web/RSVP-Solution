@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { initDb, pool } from "@/lib/db";
 import { requireAdmin, requireSender } from "@/lib/auth";
 import { broadcastDbChanged } from "@/lib/ws-broadcast";
-import { isAcceptedImageDataUrl } from "@/lib/image-upload";
+import { isAcceptedImageDataUrl, isAcceptedImageDataUrlSize } from "@/lib/image-upload";
 import { parseGuestCategories } from "@/lib/guest-categories";
 import { sanitizeDesignConfig } from "@/lib/design-types";
 import { DESIGN_TEMPLATES } from "@/lib/design-templates";
@@ -68,6 +68,9 @@ export async function PUT(
         { error: "Card image must be PNG, JPEG, WebP, GIF, or AVIF" },
         { status: 400 },
       );
+    }
+    if (!isAcceptedImageDataUrlSize(candidate)) {
+      return NextResponse.json({ error: "Card image is too large — please choose one under 5MB" }, { status: 400 });
     }
     cardImageUrl = candidate;
   }

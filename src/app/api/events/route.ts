@@ -3,7 +3,7 @@ import { initDb, pool } from "@/lib/db";
 import { generateSlug } from "@/lib/slug";
 import { broadcastDbChanged } from "@/lib/ws-broadcast";
 import { requireSender } from "@/lib/auth";
-import { isAcceptedImageDataUrl } from "@/lib/image-upload";
+import { isAcceptedImageDataUrl, isAcceptedImageDataUrlSize } from "@/lib/image-upload";
 import { sanitizeDesignConfig } from "@/lib/design-types";
 import { DESIGN_TEMPLATES } from "@/lib/design-templates";
 import { DESIGN_PALETTES } from "@/lib/design-palettes";
@@ -25,8 +25,24 @@ export async function POST(req: NextRequest) {
   if (!title) {
     return NextResponse.json({ error: "Title is required" }, { status: 400 });
   }
-  if (kind === "external_link" && !String(body.externalUrl ?? "").trim()) {
-    return NextResponse.json({ error: "External URL is required" }, { status: 400 });
+  if (kind === "external_link") {
+    const externalUrl = String(body.externalUrl ?? "").trim();
+    if (!externalUrl) {
+      return NextResponse.json({ error: "External URL is required" }, { status: 400 });
+    }
+    // Only http(s) is allowed -- this URL is rendered as a real <a href> on
+    // the public guest page (GuestEventView), so an unvalidated scheme
+    // (e.g. javascript:) would let a sender's stored value execute in a
+    // guest's browser the moment they click "RSVP now".
+    let parsed: URL;
+    try {
+      parsed = new URL(externalUrl);
+    } catch {
+      return NextResponse.json({ error: "External URL must be a valid http(s) link" }, { status: 400 });
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return NextResponse.json({ error: "External URL must be a valid http(s) link" }, { status: 400 });
+    }
   }
   if (kind === "custom_card") {
     const cardImageUrl = String(body.cardImageUrl ?? "").trim();
@@ -38,6 +54,9 @@ export async function POST(req: NextRequest) {
         { error: "Card image must be PNG, JPEG, WebP, GIF, or AVIF" },
         { status: 400 },
       );
+    }
+    if (!isAcceptedImageDataUrlSize(cardImageUrl)) {
+      return NextResponse.json({ error: "Card image is too large — please choose one under 5MB" }, { status: 400 });
     }
   }
 
