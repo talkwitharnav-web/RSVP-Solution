@@ -28,7 +28,7 @@ export async function GET(
   }
 
   const rsvpsResult = await pool.query(
-    `SELECT guest_name, attending, guest_count, category_counts, created_at
+    `SELECT id, guest_name, attending, guest_count, category_counts, created_at
      FROM rsvps WHERE event_id = $1 ORDER BY created_at ASC`,
     [event.id],
   );
