@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { initDb, pool } from "@/lib/db";
 import { verifySessionToken, SENDER_SESSION_COOKIE_NAME } from "@/lib/session";
 import type { EventRecord } from "@/lib/types";
-import EventEditor from "./EventEditor";
+import DesignEditor from "../DesignEditor";
 
 async function getEvent(slug: string): Promise<EventRecord | null> {
   await initDb();
@@ -13,12 +13,15 @@ async function getEvent(slug: string): Promise<EventRecord | null> {
 }
 
 /**
- * The sender's edit surface -- distinct from /receiver/[slug], the guest-
- * facing route. Only the owning sender can reach the real editor here;
- * anyone else (no session, a different sender) is sent to the public
- * receiver link instead of seeing edit affordances for someone else's card.
+ * The permanent editor for an already-created designed_template invitation
+ * -- its own unique link, per explicit user instruction that once an
+ * invitation exists you should always come back to the same place to keep
+ * working on it. Owner-gated the same way /e/[slug] is; a non-owner (or
+ * anyone trying this on a non-designed_template event) is sent to the
+ * public receiver link instead of seeing editor chrome for a card that
+ * isn't theirs or doesn't have a design to edit.
  */
-export default async function EventEditPage({
+export default async function EditDesignPage({
   params,
 }: {
   params: Promise<{ slug: string }>;
@@ -26,6 +29,7 @@ export default async function EventEditPage({
   const { slug } = await params;
   const event = await getEvent(slug);
   if (!event) notFound();
+  if (event.kind !== "designed_template") redirect(`/e/${slug}`);
 
   const cookieStore = await cookies();
   const senderSession = verifySessionToken(cookieStore.get(SENDER_SESSION_COOKIE_NAME)?.value);
@@ -33,10 +37,5 @@ export default async function EventEditPage({
 
   if (!isOwner) redirect(`/receiver/${slug}`);
 
-  // designed_template events are edited entirely at /create/design/[slug]
-  // now (canvas, colors, fonts, and the event-detail fields all live
-  // there) -- EventEditor no longer duplicates that UI.
-  if (event.kind === "designed_template") redirect(`/create/design/${slug}`);
-
-  return <EventEditor initialEvent={event} />;
+  return <DesignEditor initialEvent={event} />;
 }

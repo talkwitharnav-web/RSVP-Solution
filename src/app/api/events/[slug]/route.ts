@@ -5,7 +5,6 @@ import { broadcastDbChanged } from "@/lib/ws-broadcast";
 import { isAcceptedImageDataUrl, isAcceptedImageDataUrlSize } from "@/lib/image-upload";
 import { parseGuestCategories } from "@/lib/guest-categories";
 import { sanitizeDesignConfig } from "@/lib/design-types";
-import { DESIGN_PALETTES } from "@/lib/design-palettes";
 import { DESIGN_FONT_PAIRS } from "@/lib/design-fonts";
 
 export async function GET(
@@ -89,15 +88,11 @@ export async function PUT(
   // from this same app), since a direct API call could send anything.
   let designConfig = event.design_config;
   if (event.kind === "designed_template" && body.designConfig !== undefined) {
-    const sanitized = sanitizeDesignConfig(
+    designConfig = sanitizeDesignConfig(
       body.designConfig,
-      DESIGN_PALETTES.map((p) => p.id),
       DESIGN_FONT_PAIRS.map((f) => f.id),
+      event.design_config?.fontPairId ?? DESIGN_FONT_PAIRS[0].id,
     );
-    if (!sanitized) {
-      return NextResponse.json({ error: "Invalid design configuration" }, { status: 400 });
-    }
-    designConfig = sanitized;
   }
 
   // Publishing only ever goes false -> true through this route -- an

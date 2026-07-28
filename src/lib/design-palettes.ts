@@ -1,24 +1,22 @@
+import type { DesignColors } from "@/lib/design-types";
+
 /**
- * Curated color palettes for the "designed_template" invitation designer.
- * Fixed, in-code list -- not user-authorable (a free hex-code picker would
- * make the WCAG guarantees below meaningless, since a sender could pick any
- * combination). Each pair below was checked with real WCAG 2.1 contrast
- * math (not eyeballed), the same standard theme.md holds this project's own
- * palette to: 4.5:1 minimum for both "accent used as text" and "white text
- * on a solid accent fill", body text against its background comfortably
- * clears 11:1+ in every case. The dataviz skill's validator script isn't
- * vendored into this repo, so these were verified with a one-off contrast
- * calculation instead of that tool -- same bar, different mechanism.
+ * Quick-pick color presets for the "designed_template" invitation designer
+ * -- a starting point a sender can click to fill all five color roles at
+ * once, not the only option. Colors are fully open (see ColorField /
+ * sanitizeDesignConfig) per explicit user feedback that four fixed named
+ * themes felt uncreative/limiting, and that "Celebration" in particular
+ * (a yellow/brown pairing) read badly. These presets lean into more
+ * saturated, distinct hues instead of the earlier muted four, and every
+ * pairing is still checked for real WCAG 2.1 contrast (background/text
+ * 4.5:1+, onAccent/accent 4.5:1+) -- a starting point should never hand a
+ * sender an illegible card, even though nothing stops them from picking
+ * their own combination afterward.
  */
 export type DesignPalette = {
   id: string;
   name: string;
-  background: string;
-  text: string;
-  textMuted: string;
-  accent: string;
-  onAccent: string;
-};
+} & DesignColors;
 
 export const DESIGN_PALETTES: DesignPalette[] = [
   {
@@ -31,12 +29,12 @@ export const DESIGN_PALETTES: DesignPalette[] = [
     onAccent: "#FFFFFF",
   },
   {
-    id: "celebration",
-    name: "Celebration",
-    background: "#FFF6E8",
-    text: "#3A2A12",
-    textMuted: "#7A5C33",
-    accent: "#A34F0A",
+    id: "sunset",
+    name: "Sunset",
+    background: "#FFF0E6",
+    text: "#3D1F12",
+    textMuted: "#7A4A2E",
+    accent: "#E8501F",
     onAccent: "#FFFFFF",
   },
   {
@@ -50,15 +48,51 @@ export const DESIGN_PALETTES: DesignPalette[] = [
   },
   {
     id: "classic",
-    name: "Classic",
+    name: "Classic Red",
     background: "#FDF2F5",
     text: "#2B2521",
     textMuted: "#6B6259",
     accent: "#C42E3D",
     onAccent: "#FFFFFF",
   },
+  {
+    id: "ocean",
+    name: "Ocean",
+    background: "#E9F5F7",
+    text: "#0F2E33",
+    textMuted: "#3E6A70",
+    accent: "#0B7A8C",
+    onAccent: "#FFFFFF",
+  },
+  {
+    id: "berry",
+    name: "Berry",
+    background: "#FBE9F2",
+    text: "#3A0F26",
+    textMuted: "#7A3D5C",
+    accent: "#B0246E",
+    onAccent: "#FFFFFF",
+  },
+  {
+    id: "midnight",
+    name: "Midnight",
+    background: "#1B1830",
+    text: "#F2EEFB",
+    textMuted: "#B6ADD6",
+    accent: "#8B7CF6",
+    onAccent: "#1B1830",
+  },
+  {
+    id: "citrus",
+    name: "Citrus",
+    background: "#FFF9E3",
+    text: "#33280A",
+    textMuted: "#6E5A1E",
+    accent: "#C98A00",
+    onAccent: "#FFFFFF",
+  },
 ];
 
-export function getDesignPalette(id: string): DesignPalette {
-  return DESIGN_PALETTES.find((p) => p.id === id) ?? DESIGN_PALETTES[0];
+export function getDesignPalette(id: string): DesignPalette | undefined {
+  return DESIGN_PALETTES.find((p) => p.id === id);
 }

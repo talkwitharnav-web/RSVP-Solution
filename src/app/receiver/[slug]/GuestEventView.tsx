@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useWebSocket } from "@/lib/useWebSocket";
 import type { EventRecord } from "@/lib/types";
-import { getDesignPalette } from "@/lib/design-palettes";
+import { DEFAULT_DESIGN_COLORS } from "@/lib/design-types";
 import { FabricCanvas } from "@/components/design/FabricCanvas";
 import RsvpForm from "./RsvpForm";
 
@@ -71,7 +71,7 @@ export default function GuestEventView({ initialEvent }: { initialEvent: EventRe
             canvasWidth={event.design_config.canvasWidth}
             canvasHeight={event.design_config.canvasHeight}
             initialJSON={event.design_config.canvasJSON}
-            backgroundColor={getDesignPalette(event.design_config.paletteId).background}
+            backgroundColor={event.design_config.colors?.background ?? DEFAULT_DESIGN_COLORS.background}
             readOnly
             className="h-full w-full"
           />

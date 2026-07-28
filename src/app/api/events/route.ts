@@ -5,7 +5,6 @@ import { broadcastDbChanged } from "@/lib/ws-broadcast";
 import { requireSender } from "@/lib/auth";
 import { isAcceptedImageDataUrl, isAcceptedImageDataUrlSize } from "@/lib/image-upload";
 import { sanitizeDesignConfig } from "@/lib/design-types";
-import { DESIGN_PALETTES } from "@/lib/design-palettes";
 import { DESIGN_FONT_PAIRS } from "@/lib/design-fonts";
 import type { RsvpQuestion } from "@/lib/types";
 
@@ -58,16 +57,16 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Only an event title is required to create a designed_template invitation
+  // -- palette/font/canvas all have safe defaults, per explicit user
+  // instruction that there should be no other requirement to create or save.
   let designConfig = null;
   if (kind === "designed_template") {
     designConfig = sanitizeDesignConfig(
       body.designConfig,
-      DESIGN_PALETTES.map((p) => p.id),
       DESIGN_FONT_PAIRS.map((f) => f.id),
+      DESIGN_FONT_PAIRS[0].id,
     );
-    if (!designConfig) {
-      return NextResponse.json({ error: "A palette, font pair, and card design are required" }, { status: 400 });
-    }
   }
 
   const questions: RsvpQuestion[] =

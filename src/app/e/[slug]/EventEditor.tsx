@@ -1,30 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, ChangeEvent, FormEvent } from "react";
+import { useState, useEffect, ChangeEvent, FormEvent } from "react";
 import Link from "next/link";
-import {
-  ArrowLeft,
-  ImagePlus,
-  Eye,
-  Rocket,
-  Check,
-  Type,
-  Trash2,
-  BringToFront,
-  SendToBack,
-} from "lucide-react";
+import { ArrowLeft, ImagePlus, Eye, Rocket, Check } from "lucide-react";
 import { Input, Label } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { CopyableValue } from "@/components/ui/CopyableValue";
 import { isAcceptedImageType, isHeicFile, convertHeicToJpeg } from "@/lib/image-upload";
 import { formatGuestCategories } from "@/lib/guest-categories";
-import { DESIGN_PALETTES } from "@/lib/design-palettes";
-import { DESIGN_ICONS, DESIGN_DECORATIONS } from "@/lib/design-icons";
-import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT } from "@/lib/design-types";
-import { FabricCanvas, FabricCanvasHandle, CanvasLayerSummary } from "@/components/design/FabricCanvas";
-import { LayersPanel } from "@/components/design/LayersPanel";
-import { FontPicker } from "@/components/design/FontPicker";
 import type { EventRecord } from "@/lib/types";
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -63,13 +47,6 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
   const [guestCategoriesText, setGuestCategoriesText] = useState(formatGuestCategories(initialEvent.guest_categories));
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(initialEvent.card_image_url);
-  const [paletteId, setPaletteId] = useState(initialEvent.design_config?.paletteId ?? DESIGN_PALETTES[0].id);
-  const [fontPairId, setFontPairId] = useState(initialEvent.design_config?.fontPairId ?? "signature");
-  const [hasCanvasSelection, setHasCanvasSelection] = useState(false);
-  const [recolorValue, setRecolorValue] = useState("#000000");
-  const [layers, setLayers] = useState<CanvasLayerSummary[]>([]);
-  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
-  const canvasRef = useRef<FabricCanvasHandle>(null);
   const [convertingHeic, setConvertingHeic] = useState(false);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -117,53 +94,6 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
     setImagePreview(dataUrl);
   };
 
-  const refreshLayers = useCallback(() => {
-    setLayers(canvasRef.current?.getLayers() ?? []);
-  }, []);
-
-  const handleCanvasImageChange = async (e: ChangeEvent<HTMLInputElement>) => {
-    let file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = "";
-
-    if (isHeicFile(file)) {
-      setConvertingHeic(true);
-      setError(null);
-      try {
-        file = await convertHeicToJpeg(file);
-      } catch {
-        setError("Couldn't convert that HEIC photo — please try a different image.");
-        setConvertingHeic(false);
-        return;
-      }
-      setConvertingHeic(false);
-    }
-
-    if (!isAcceptedImageType(file)) {
-      setError("Please choose a PNG, JPEG, WebP, GIF, or AVIF image (SVG isn't supported).");
-      return;
-    }
-    if (file.size > MAX_IMAGE_BYTES) {
-      setError("Image is too large — please choose one under 5MB.");
-      return;
-    }
-    setError(null);
-    const dataUrl = await fileToDataUrl(file);
-    await canvasRef.current?.addImage(dataUrl);
-    refreshLayers();
-  };
-
-  const handleCanvasSelectionChange = useCallback(
-    (has: boolean) => {
-      setHasCanvasSelection(has);
-      refreshLayers();
-      if (!has) setSelectedLayerId(null);
-    },
-    [refreshLayers],
-  );
-
-  const palette = DESIGN_PALETTES.find((p) => p.id === paletteId) ?? DESIGN_PALETTES[0];
-
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -181,17 +111,6 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
           location: location || null,
           guestCategories: guestCategoriesText,
           ...(imageDataUrl ? { cardImageUrl: imageDataUrl } : {}),
-          ...(event.kind === "designed_template"
-            ? {
-                designConfig: {
-                  paletteId,
-                  fontPairId,
-                  canvasJSON: canvasRef.current?.getJSON() ?? event.design_config?.canvasJSON ?? { objects: [] },
-                  canvasWidth: event.design_config?.canvasWidth ?? DEFAULT_CANVAS_WIDTH,
-                  canvasHeight: event.design_config?.canvasHeight ?? DEFAULT_CANVAS_HEIGHT,
-                },
-              }
-            : {}),
         }),
       });
       const data = await res.json();
@@ -320,11 +239,6 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
             <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} required />
           </div>
 
-          {event.kind === "designed_template" && (
-            <p className="text-xs text-[var(--color-text-muted)]">
-              These fields are used for your dashboard and RSVP records — add matching text to the card itself below if you want it visible there.
-            </p>
-          )}
           <div>
             <Label htmlFor="hostName">Host name</Label>
             <Input id="hostName" value={hostName} onChange={(e) => setHostName(e.target.value)} />
@@ -347,195 +261,6 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
               className="w-full px-4 py-3 text-base bg-[var(--color-surface-0)] text-[var(--color-text-primary)] border border-[var(--color-border-strong)] rounded-[var(--radius-sm)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-coral-text)] focus:border-[var(--color-accent-coral-text)] transition-colors"
             />
           </div>
-
-          {event.kind === "designed_template" && event.design_config && (
-            <div className="space-y-4 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
-              <div>
-                <Label>Color palette</Label>
-                <div className="grid grid-cols-4 gap-2">
-                  {DESIGN_PALETTES.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => setPaletteId(p.id)}
-                      title={p.name}
-                      className={`flex h-8 overflow-hidden rounded-[var(--radius-sm)] border-2 ${
-                        paletteId === p.id ? "border-[var(--color-accent-coral-text)]" : "border-transparent"
-                      }`}
-                      style={{ backgroundColor: p.background }}
-                    >
-                      <span className="ml-auto h-full w-3" style={{ backgroundColor: p.accent }} />
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <Label>Font pairing</Label>
-                <FontPicker value={fontPairId} onChange={setFontPairId} />
-              </div>
-
-              <div>
-                <Label>Add to card</Label>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      canvasRef.current?.addText();
-                      refreshLayers();
-                    }}
-                  >
-                    <Type className="h-4 w-4" strokeWidth={2} />
-                    Text
-                  </Button>
-                  <label
-                    htmlFor="canvas-image"
-                    className="inline-flex cursor-pointer items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] px-3 py-1.5 text-sm font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-surface-0)] transition-colors"
-                  >
-                    <ImagePlus className="h-4 w-4" strokeWidth={2} />
-                    {convertingHeic ? "Converting..." : "Image"}
-                  </label>
-                  <input
-                    id="canvas-image"
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/heic,image/heif,.heic,.heif"
-                    onChange={handleCanvasImageChange}
-                    className="sr-only"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <Label>Icons</Label>
-                <p className="mb-1.5 text-[0.65rem] text-[var(--color-text-muted)]">Icons keep their shape when resized.</p>
-                <div className="flex flex-wrap gap-2">
-                  {DESIGN_ICONS.map((icon) => (
-                    <button
-                      key={icon.id}
-                      type="button"
-                      onClick={() => {
-                        canvasRef.current?.addIcon(icon, palette.accent);
-                        refreshLayers();
-                      }}
-                      title={icon.name}
-                      className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] border-2 border-[var(--color-border-strong)] hover:border-[var(--color-accent-coral-text)] transition-colors"
-                    >
-                      <icon.Icon className="h-4 w-4 text-[var(--color-text-primary)]" strokeWidth={1.75} />
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <Label>Decorations</Label>
-                <div className="flex flex-wrap gap-2">
-                  {DESIGN_DECORATIONS.map((decoration) => (
-                    <button
-                      key={decoration.id}
-                      type="button"
-                      onClick={() => {
-                        canvasRef.current?.addDecoration(decoration, palette.accent);
-                        refreshLayers();
-                      }}
-                      title={decoration.name}
-                      className="flex h-9 items-center justify-center rounded-[var(--radius-sm)] border-2 border-[var(--color-border-strong)] px-2 text-xs text-[var(--color-text-primary)] hover:border-[var(--color-accent-coral-text)] transition-colors"
-                    >
-                      {decoration.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <Label>Layers</Label>
-                <LayersPanel
-                  layers={layers}
-                  selectedLayerId={selectedLayerId}
-                  onSelect={(layerId) => {
-                    canvasRef.current?.selectLayer(layerId);
-                    setSelectedLayerId(layerId);
-                  }}
-                  onMoveUp={(layerId, index) => {
-                    canvasRef.current?.moveLayer(layerId, Math.max(0, index - 1));
-                    refreshLayers();
-                  }}
-                  onMoveDown={(layerId, index) => {
-                    canvasRef.current?.moveLayer(layerId, index + 1);
-                    refreshLayers();
-                  }}
-                  onDelete={(layerId) => {
-                    canvasRef.current?.deleteLayer(layerId);
-                    refreshLayers();
-                  }}
-                />
-              </div>
-
-              {hasCanvasSelection && (
-                <div>
-                  <Label>Selected element</Label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={recolorValue}
-                      onChange={(e) => {
-                        setRecolorValue(e.target.value);
-                        canvasRef.current?.recolorSelected(e.target.value);
-                      }}
-                      className="h-9 w-9 cursor-pointer rounded-[var(--radius-sm)] border border-[var(--color-border-strong)]"
-                      title="Recolor"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => canvasRef.current?.bringSelectedToFront()}
-                      title="Bring to front"
-                      className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] hover:bg-[var(--color-surface-0)]"
-                    >
-                      <BringToFront className="h-4 w-4" strokeWidth={2} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => canvasRef.current?.sendSelectedToBack()}
-                      title="Send to back"
-                      className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] hover:bg-[var(--color-surface-0)]"
-                    >
-                      <SendToBack className="h-4 w-4" strokeWidth={2} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        canvasRef.current?.deleteSelected();
-                        refreshLayers();
-                      }}
-                      title="Delete"
-                      className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-danger)] text-[var(--color-danger)] hover:bg-[var(--color-surface-0)]"
-                    >
-                      <Trash2 className="h-4 w-4" strokeWidth={2} />
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <Label>Card</Label>
-                <div
-                  className="mx-auto flex w-full max-w-[280px] overflow-hidden rounded-[var(--radius-sm)] border border-[var(--color-border-strong)]"
-                  style={{ aspectRatio: `${event.design_config.canvasWidth} / ${event.design_config.canvasHeight}` }}
-                >
-                  <FabricCanvas
-                    ref={canvasRef}
-                    canvasWidth={event.design_config.canvasWidth}
-                    canvasHeight={event.design_config.canvasHeight}
-                    initialJSON={event.design_config.canvasJSON}
-                    backgroundColor={palette.background}
-                    className="h-full w-full"
-                    onSelectionChange={handleCanvasSelectionChange}
-                    onChange={refreshLayers}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
 
           {event.kind !== "external_link" && (
             <div>
