@@ -1,8 +1,18 @@
 "use client";
 
-import { useState, useEffect, ChangeEvent, FormEvent } from "react";
+import { useState, useEffect, useCallback, useRef, ChangeEvent, FormEvent } from "react";
 import Link from "next/link";
-import { ArrowLeft, ImagePlus, Eye, Rocket, Check } from "lucide-react";
+import {
+  ArrowLeft,
+  ImagePlus,
+  Eye,
+  Rocket,
+  Check,
+  Type,
+  Trash2,
+  BringToFront,
+  SendToBack,
+} from "lucide-react";
 import { Input, Label } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -10,12 +20,11 @@ import { CopyableValue } from "@/components/ui/CopyableValue";
 import { isAcceptedImageType, isHeicFile, convertHeicToJpeg } from "@/lib/image-upload";
 import { formatGuestCategories } from "@/lib/guest-categories";
 import { DESIGN_PALETTES } from "@/lib/design-palettes";
-import { DESIGN_FONT_PAIRS } from "@/lib/design-fonts";
-import { DESIGN_ICONS } from "@/lib/design-icons";
-import { getDesignTemplate } from "@/lib/design-templates";
-import type { DesignConfig, SlotOffset } from "@/lib/design-types";
-import type { DesignedCardFields } from "@/components/design/DesignedCardContent";
-import { SlotEditor } from "@/components/design/SlotEditor";
+import { DESIGN_ICONS, DESIGN_DECORATIONS } from "@/lib/design-icons";
+import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT } from "@/lib/design-types";
+import { FabricCanvas, FabricCanvasHandle, CanvasLayerSummary } from "@/components/design/FabricCanvas";
+import { LayersPanel } from "@/components/design/LayersPanel";
+import { FontPicker } from "@/components/design/FontPicker";
 import type { EventRecord } from "@/lib/types";
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -55,9 +64,12 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(initialEvent.card_image_url);
   const [paletteId, setPaletteId] = useState(initialEvent.design_config?.paletteId ?? DESIGN_PALETTES[0].id);
-  const [fontPairId, setFontPairId] = useState(initialEvent.design_config?.fontPairId ?? DESIGN_FONT_PAIRS[0].id);
-  const [iconId, setIconId] = useState<string | null>(initialEvent.design_config?.iconId ?? null);
-  const [slots, setSlots] = useState<Record<string, SlotOffset>>(initialEvent.design_config?.slots ?? {});
+  const [fontPairId, setFontPairId] = useState(initialEvent.design_config?.fontPairId ?? "signature");
+  const [hasCanvasSelection, setHasCanvasSelection] = useState(false);
+  const [recolorValue, setRecolorValue] = useState("#000000");
+  const [layers, setLayers] = useState<CanvasLayerSummary[]>([]);
+  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
+  const canvasRef = useRef<FabricCanvasHandle>(null);
   const [convertingHeic, setConvertingHeic] = useState(false);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -105,10 +117,52 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
     setImagePreview(dataUrl);
   };
 
-  const designConfig: DesignConfig | null =
-    event.kind === "designed_template" && event.design_config
-      ? { templateId: event.design_config.templateId, paletteId, fontPairId, iconId, slots }
-      : null;
+  const refreshLayers = useCallback(() => {
+    setLayers(canvasRef.current?.getLayers() ?? []);
+  }, []);
+
+  const handleCanvasImageChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    let file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+
+    if (isHeicFile(file)) {
+      setConvertingHeic(true);
+      setError(null);
+      try {
+        file = await convertHeicToJpeg(file);
+      } catch {
+        setError("Couldn't convert that HEIC photo — please try a different image.");
+        setConvertingHeic(false);
+        return;
+      }
+      setConvertingHeic(false);
+    }
+
+    if (!isAcceptedImageType(file)) {
+      setError("Please choose a PNG, JPEG, WebP, GIF, or AVIF image (SVG isn't supported).");
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setError("Image is too large — please choose one under 5MB.");
+      return;
+    }
+    setError(null);
+    const dataUrl = await fileToDataUrl(file);
+    await canvasRef.current?.addImage(dataUrl);
+    refreshLayers();
+  };
+
+  const handleCanvasSelectionChange = useCallback(
+    (has: boolean) => {
+      setHasCanvasSelection(has);
+      refreshLayers();
+      if (!has) setSelectedLayerId(null);
+    },
+    [refreshLayers],
+  );
+
+  const palette = DESIGN_PALETTES.find((p) => p.id === paletteId) ?? DESIGN_PALETTES[0];
 
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
@@ -127,7 +181,17 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
           location: location || null,
           guestCategories: guestCategoriesText,
           ...(imageDataUrl ? { cardImageUrl: imageDataUrl } : {}),
-          ...(designConfig ? { designConfig } : {}),
+          ...(event.kind === "designed_template"
+            ? {
+                designConfig: {
+                  paletteId,
+                  fontPairId,
+                  canvasJSON: canvasRef.current?.getJSON() ?? event.design_config?.canvasJSON ?? { objects: [] },
+                  canvasWidth: event.design_config?.canvasWidth ?? DEFAULT_CANVAS_WIDTH,
+                  canvasHeight: event.design_config?.canvasHeight ?? DEFAULT_CANVAS_HEIGHT,
+                },
+              }
+            : {}),
         }),
       });
       const data = await res.json();
@@ -255,6 +319,12 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
             <Label htmlFor="title">Event title</Label>
             <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} required />
           </div>
+
+          {event.kind === "designed_template" && (
+            <p className="text-xs text-[var(--color-text-muted)]">
+              These fields are used for your dashboard and RSVP records — add matching text to the card itself below if you want it visible there.
+            </p>
+          )}
           <div>
             <Label htmlFor="hostName">Host name</Label>
             <Input id="hostName" value={hostName} onChange={(e) => setHostName(e.target.value)} />
@@ -302,96 +372,167 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
 
               <div>
                 <Label>Font pairing</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {DESIGN_FONT_PAIRS.map((f) => (
+                <FontPicker value={fontPairId} onChange={setFontPairId} />
+              </div>
+
+              <div>
+                <Label>Add to card</Label>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      canvasRef.current?.addText();
+                      refreshLayers();
+                    }}
+                  >
+                    <Type className="h-4 w-4" strokeWidth={2} />
+                    Text
+                  </Button>
+                  <label
+                    htmlFor="canvas-image"
+                    className="inline-flex cursor-pointer items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] px-3 py-1.5 text-sm font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-surface-0)] transition-colors"
+                  >
+                    <ImagePlus className="h-4 w-4" strokeWidth={2} />
+                    {convertingHeic ? "Converting..." : "Image"}
+                  </label>
+                  <input
+                    id="canvas-image"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/heic,image/heif,.heic,.heif"
+                    onChange={handleCanvasImageChange}
+                    className="sr-only"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label>Icons</Label>
+                <p className="mb-1.5 text-[0.65rem] text-[var(--color-text-muted)]">Icons keep their shape when resized.</p>
+                <div className="flex flex-wrap gap-2">
+                  {DESIGN_ICONS.map((icon) => (
                     <button
-                      key={f.id}
+                      key={icon.id}
                       type="button"
-                      onClick={() => setFontPairId(f.id)}
-                      className={`rounded-[var(--radius-sm)] border-2 px-3 py-1.5 text-left text-sm transition-colors ${
-                        fontPairId === f.id ? "border-[var(--color-accent-coral-text)]" : "border-[var(--color-border-strong)]"
-                      }`}
-                      style={{ fontFamily: f.displayVar }}
+                      onClick={() => {
+                        canvasRef.current?.addIcon(icon, palette.accent);
+                        refreshLayers();
+                      }}
+                      title={icon.name}
+                      className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] border-2 border-[var(--color-border-strong)] hover:border-[var(--color-accent-coral-text)] transition-colors"
                     >
-                      {f.name}
+                      <icon.Icon className="h-4 w-4 text-[var(--color-text-primary)]" strokeWidth={1.75} />
                     </button>
                   ))}
                 </div>
               </div>
 
               <div>
-                <Label>Decorative icon</Label>
+                <Label>Decorations</Label>
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIconId(null)}
-                    className={`flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] border-2 text-[0.65rem] ${
-                      iconId === null ? "border-[var(--color-accent-coral-text)]" : "border-[var(--color-border-strong)]"
-                    }`}
-                  >
-                    None
-                  </button>
-                  {DESIGN_ICONS.map(({ id, name, Icon }) => (
+                  {DESIGN_DECORATIONS.map((decoration) => (
                     <button
-                      key={id}
+                      key={decoration.id}
                       type="button"
-                      onClick={() => setIconId(id)}
-                      title={name}
-                      className={`flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] border-2 ${
-                        iconId === id ? "border-[var(--color-accent-coral-text)]" : "border-[var(--color-border-strong)]"
-                      }`}
+                      onClick={() => {
+                        canvasRef.current?.addDecoration(decoration, palette.accent);
+                        refreshLayers();
+                      }}
+                      title={decoration.name}
+                      className="flex h-9 items-center justify-center rounded-[var(--radius-sm)] border-2 border-[var(--color-border-strong)] px-2 text-xs text-[var(--color-text-primary)] hover:border-[var(--color-accent-coral-text)] transition-colors"
                     >
-                      <Icon className="h-4 w-4 text-[var(--color-text-primary)]" strokeWidth={1.75} />
+                      {decoration.name}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {"photo" in getDesignTemplate(event.design_config.templateId).slots && (
+              <div>
+                <Label>Layers</Label>
+                <LayersPanel
+                  layers={layers}
+                  selectedLayerId={selectedLayerId}
+                  onSelect={(layerId) => {
+                    canvasRef.current?.selectLayer(layerId);
+                    setSelectedLayerId(layerId);
+                  }}
+                  onMoveUp={(layerId, index) => {
+                    canvasRef.current?.moveLayer(layerId, Math.max(0, index - 1));
+                    refreshLayers();
+                  }}
+                  onMoveDown={(layerId, index) => {
+                    canvasRef.current?.moveLayer(layerId, index + 1);
+                    refreshLayers();
+                  }}
+                  onDelete={(layerId) => {
+                    canvasRef.current?.deleteLayer(layerId);
+                    refreshLayers();
+                  }}
+                />
+              </div>
+
+              {hasCanvasSelection && (
                 <div>
-                  <Label htmlFor="card-image">Photo</Label>
-                  <label
-                    htmlFor="card-image"
-                    className="flex flex-col items-center justify-center gap-1.5 rounded-[var(--radius-sm)] border-2 border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface-0)] p-3 cursor-pointer hover:border-[var(--color-accent-coral-text)] transition-colors"
-                  >
-                    {convertingHeic ? (
-                      <span className="text-sm text-[var(--color-text-muted)]">Converting HEIC photo...</span>
-                    ) : imagePreview ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- data URL / uploaded image, not an optimizable static asset
-                      <img src={imagePreview} alt="Card photo preview" className="max-h-32 rounded-[var(--radius-sm)] object-contain" />
-                    ) : (
-                      <>
-                        <ImagePlus className="h-6 w-6 text-[var(--color-text-muted)]" strokeWidth={1.5} />
-                        <span className="text-xs text-[var(--color-text-muted)]">Click to change photo</span>
-                      </>
-                    )}
-                  </label>
-                  <input
-                    id="card-image"
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/heic,image/heif,.heic,.heif"
-                    onChange={handleImageChange}
-                    className="sr-only"
-                  />
+                  <Label>Selected element</Label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={recolorValue}
+                      onChange={(e) => {
+                        setRecolorValue(e.target.value);
+                        canvasRef.current?.recolorSelected(e.target.value);
+                      }}
+                      className="h-9 w-9 cursor-pointer rounded-[var(--radius-sm)] border border-[var(--color-border-strong)]"
+                      title="Recolor"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => canvasRef.current?.bringSelectedToFront()}
+                      title="Bring to front"
+                      className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] hover:bg-[var(--color-surface-0)]"
+                    >
+                      <BringToFront className="h-4 w-4" strokeWidth={2} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => canvasRef.current?.sendSelectedToBack()}
+                      title="Send to back"
+                      className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] hover:bg-[var(--color-surface-0)]"
+                    >
+                      <SendToBack className="h-4 w-4" strokeWidth={2} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        canvasRef.current?.deleteSelected();
+                        refreshLayers();
+                      }}
+                      title="Delete"
+                      className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-danger)] text-[var(--color-danger)] hover:bg-[var(--color-surface-0)]"
+                    >
+                      <Trash2 className="h-4 w-4" strokeWidth={2} />
+                    </button>
+                  </div>
                 </div>
               )}
 
               <div>
-                <Label>Layout — drag or resize any element</Label>
-                <SlotEditor
-                  config={designConfig!}
-                  fields={
-                    {
-                      title,
-                      hostName: hostName || null,
-                      description: description || null,
-                      eventDate: eventDate ? new Date(eventDate).toISOString() : null,
-                      location: location || null,
-                      cardImageUrl: imagePreview,
-                    } satisfies DesignedCardFields
-                  }
-                  onSlotChange={(slotId, offset) => setSlots((prev) => ({ ...prev, [slotId]: offset }))}
-                />
+                <Label>Card</Label>
+                <div
+                  className="mx-auto flex w-full max-w-[280px] overflow-hidden rounded-[var(--radius-sm)] border border-[var(--color-border-strong)]"
+                  style={{ aspectRatio: `${event.design_config.canvasWidth} / ${event.design_config.canvasHeight}` }}
+                >
+                  <FabricCanvas
+                    ref={canvasRef}
+                    canvasWidth={event.design_config.canvasWidth}
+                    canvasHeight={event.design_config.canvasHeight}
+                    initialJSON={event.design_config.canvasJSON}
+                    backgroundColor={palette.background}
+                    className="h-full w-full"
+                    onSelectionChange={handleCanvasSelectionChange}
+                    onChange={refreshLayers}
+                  />
+                </div>
               </div>
             </div>
           )}

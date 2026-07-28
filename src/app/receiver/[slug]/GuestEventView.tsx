@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useWebSocket } from "@/lib/useWebSocket";
 import type { EventRecord } from "@/lib/types";
-import { DesignedCardContent } from "@/components/design/DesignedCardContent";
+import { getDesignPalette } from "@/lib/design-palettes";
+import { FabricCanvas } from "@/components/design/FabricCanvas";
 import RsvpForm from "./RsvpForm";
 
 // Defense in depth alongside the server-side check in POST /api/events --
@@ -56,17 +57,25 @@ export default function GuestEventView({ initialEvent }: { initialEvent: EventRe
       style={{ maxWidth: "clamp(24rem, 60vw, 40rem)" }}
     >
       {event.kind === "designed_template" && event.design_config ? (
-        <DesignedCardContent
-          config={event.design_config}
-          fields={{
-            title: event.title,
-            hostName: event.host_name,
-            description: event.description,
-            eventDate: event.event_date,
-            location: event.location,
-            cardImageUrl: event.card_image_url,
+        <div
+          className="mx-auto flex w-full overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)] shadow-lg"
+          style={{
+            maxWidth: "28rem",
+            aspectRatio: `${event.design_config.canvasWidth} / ${event.design_config.canvasHeight}`,
           }}
-        />
+        >
+          {/* Read-only: same fabric.Canvas + same canvasJSON as the editor,
+              interaction disabled -- guarantees the guest sees pixel-identical
+              content to what the sender designed, never a re-derived render. */}
+          <FabricCanvas
+            canvasWidth={event.design_config.canvasWidth}
+            canvasHeight={event.design_config.canvasHeight}
+            initialJSON={event.design_config.canvasJSON}
+            backgroundColor={getDesignPalette(event.design_config.paletteId).background}
+            readOnly
+            className="h-full w-full"
+          />
+        </div>
       ) : (
         <div className="flex flex-col gap-2">
           <h1

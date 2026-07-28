@@ -1,92 +1,87 @@
 /**
- * Shared types for the "designed_template" EventKind -- the template-
- * constrained-canvas invitation designer. See "custom rsvp card designer.md"
- * (section 7) for the full research/decision writeup behind this shape.
+ * Shared types for the "designed_template" EventKind -- the Fabric.js
+ * canvas-based invitation designer. See "custom rsvp card designer.md"
+ * (section 7 onward) for the research/decision writeup behind this shape.
+ *
+ * `canvasJSON` is Fabric's own `canvas.toJSON()` scene graph (objects,
+ * positions, colors, text content, embedded images) -- no custom scene-graph
+ * parsing is written or maintained here, Fabric's own (de)serialization is
+ * trusted for shape and only lightly validated for size/structure below.
  */
 
-export type SlotOffset = { x: number; y: number; scale: number };
-
-/**
- * Per-event design choices. Stored as-is in events.design_config (JSONB).
- * `slots` only needs to contain entries for slots the sender actually moved
- * away from their template default -- a template's own DEFAULT_SLOTS is the
- * fallback for anything missing here, so an untouched slot always renders
- * correctly even if it's absent from a saved design_config.
- */
 export type DesignConfig = {
-  templateId: string;
   paletteId: string;
   fontPairId: string;
-  iconId: string | null;
-  slots: Record<string, SlotOffset>;
+  canvasJSON: Record<string, unknown>;
+  canvasWidth: number;
+  canvasHeight: number;
 };
 
-/** x/y/scale a slot renders at if the sender never dragged/resized it. */
-export const DEFAULT_SLOT_OFFSET: SlotOffset = { x: 0, y: 0, scale: 1 };
+export const DEFAULT_CANVAS_WIDTH = 1000;
+export const DEFAULT_CANVAS_HEIGHT = 1250; // 4:5, matches the card aspect ratio used elsewhere in the app
 
-export function resolveSlotOffset(
-  config: DesignConfig | null | undefined,
-  slotId: string,
-  templateDefault: SlotOffset,
-): SlotOffset {
-  return config?.slots?.[slotId] ?? templateDefault;
+const MIN_CANVAS_DIMENSION = 200;
+const MAX_CANVAS_DIMENSION = 4000;
+
+// A canvas with several embedded photos could otherwise store an unbounded
+// blob -- same defense-in-depth posture as isAcceptedImageDataUrlSize() in
+// src/lib/image-upload.ts.
+export const MAX_CANVAS_JSON_BYTES = 2 * 1024 * 1024;
+
+function clampDimension(value: unknown, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(MAX_CANVAS_DIMENSION, Math.max(MIN_CANVAS_DIMENSION, n));
 }
 
-// Bounds a slot offset can realistically need -- generous enough that a
-// sender dragging within (or slightly past, since react-rnd's own bounds
-// prop already constrains this in the UI) a template's safe area never gets
-// clamped in normal use, tight enough that a malformed/malicious direct API
-// call can't inject an absurd value. Same defense-in-depth pattern as the
-// RSVP category-count clamp in POST /api/events/[slug]/rsvps.
-const MIN_COORD = -50;
-const MAX_COORD = 150;
-const MIN_SCALE = 0.25;
-const MAX_SCALE = 3;
-
-function clamp(value: unknown, min: number, max: number, fallback: number): number {
-  const n = Number(value);
-  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+/** A loose structural check that `value` looks like a Fabric canvas JSON export. */
+function isPlausibleCanvasJSON(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return Array.isArray(v.objects);
 }
 
 /**
  * Validates and clamps a client-supplied design_config into a well-formed
  * one, or returns null if the required fields aren't even present -- used
  * by POST /api/events and PUT /api/events/[slug] so a direct API call can't
- * store an unbounded slots object or reference a template/palette/font/icon
- * id that doesn't exist in the fixed registries.
+ * reference a palette/font id that doesn't exist in the fixed registries,
+ * store a malformed canvas scene, or store an unbounded canvasJSON blob.
  */
 export function sanitizeDesignConfig(
   raw: unknown,
-  validTemplateIds: string[],
   validPaletteIds: string[],
   validFontPairIds: string[],
-  validIconIds: string[],
 ): DesignConfig | null {
   if (typeof raw !== "object" || raw === null) return null;
   const input = raw as Record<string, unknown>;
 
-  const templateId = typeof input.templateId === "string" ? input.templateId : "";
   const paletteId = typeof input.paletteId === "string" ? input.paletteId : "";
   const fontPairId = typeof input.fontPairId === "string" ? input.fontPairId : "";
-  if (!validTemplateIds.includes(templateId)) return null;
   if (!validPaletteIds.includes(paletteId)) return null;
   if (!validFontPairIds.includes(fontPairId)) return null;
 
-  const rawIconId = typeof input.iconId === "string" ? input.iconId : null;
-  const iconId = rawIconId && validIconIds.includes(rawIconId) ? rawIconId : null;
+  if (!isPlausibleCanvasJSON(input.canvasJSON)) return null;
 
-  const slots: Record<string, SlotOffset> = {};
-  if (typeof input.slots === "object" && input.slots !== null) {
-    for (const [slotId, value] of Object.entries(input.slots as Record<string, unknown>)) {
-      if (typeof value !== "object" || value === null) continue;
-      const v = value as Record<string, unknown>;
-      slots[slotId] = {
-        x: clamp(v.x, MIN_COORD, MAX_COORD, DEFAULT_SLOT_OFFSET.x),
-        y: clamp(v.y, MIN_COORD, MAX_COORD, DEFAULT_SLOT_OFFSET.y),
-        scale: clamp(v.scale, MIN_SCALE, MAX_SCALE, DEFAULT_SLOT_OFFSET.scale),
-      };
-    }
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(input.canvasJSON);
+  } catch {
+    return null;
   }
+  // .length (UTF-16 code units) slightly overcounts vs. true UTF-8 byte size,
+  // which only makes this bound slightly stricter -- fine for a defense-in-
+  // depth cap, and keeps this module usable from both client and server code.
+  if (serialized.length > MAX_CANVAS_JSON_BYTES) return null;
 
-  return { templateId, paletteId, fontPairId, iconId, slots };
+  const canvasWidth = clampDimension(input.canvasWidth, DEFAULT_CANVAS_WIDTH);
+  const canvasHeight = clampDimension(input.canvasHeight, DEFAULT_CANVAS_HEIGHT);
+
+  return {
+    paletteId,
+    fontPairId,
+    canvasJSON: input.canvasJSON as Record<string, unknown>,
+    canvasWidth,
+    canvasHeight,
+  };
 }

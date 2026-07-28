@@ -5,10 +5,8 @@ import { broadcastDbChanged } from "@/lib/ws-broadcast";
 import { requireSender } from "@/lib/auth";
 import { isAcceptedImageDataUrl, isAcceptedImageDataUrlSize } from "@/lib/image-upload";
 import { sanitizeDesignConfig } from "@/lib/design-types";
-import { DESIGN_TEMPLATES } from "@/lib/design-templates";
 import { DESIGN_PALETTES } from "@/lib/design-palettes";
 import { DESIGN_FONT_PAIRS } from "@/lib/design-fonts";
-import { DESIGN_ICONS } from "@/lib/design-icons";
 import type { RsvpQuestion } from "@/lib/types";
 
 const VALID_KINDS = ["external_link", "hosted_template", "custom_card", "designed_template"];
@@ -64,13 +62,11 @@ export async function POST(req: NextRequest) {
   if (kind === "designed_template") {
     designConfig = sanitizeDesignConfig(
       body.designConfig,
-      DESIGN_TEMPLATES.map((t) => t.id),
       DESIGN_PALETTES.map((p) => p.id),
       DESIGN_FONT_PAIRS.map((f) => f.id),
-      DESIGN_ICONS.map((i) => i.id),
     );
     if (!designConfig) {
-      return NextResponse.json({ error: "A template, palette, and font pair are required" }, { status: 400 });
+      return NextResponse.json({ error: "A palette, font pair, and card design are required" }, { status: 400 });
     }
   }
 

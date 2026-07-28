@@ -5,10 +5,8 @@ import { broadcastDbChanged } from "@/lib/ws-broadcast";
 import { isAcceptedImageDataUrl, isAcceptedImageDataUrlSize } from "@/lib/image-upload";
 import { parseGuestCategories } from "@/lib/guest-categories";
 import { sanitizeDesignConfig } from "@/lib/design-types";
-import { DESIGN_TEMPLATES } from "@/lib/design-templates";
 import { DESIGN_PALETTES } from "@/lib/design-palettes";
 import { DESIGN_FONT_PAIRS } from "@/lib/design-fonts";
-import { DESIGN_ICONS } from "@/lib/design-icons";
 
 export async function GET(
   _req: NextRequest,
@@ -93,10 +91,8 @@ export async function PUT(
   if (event.kind === "designed_template" && body.designConfig !== undefined) {
     const sanitized = sanitizeDesignConfig(
       body.designConfig,
-      DESIGN_TEMPLATES.map((t) => t.id),
       DESIGN_PALETTES.map((p) => p.id),
       DESIGN_FONT_PAIRS.map((f) => f.id),
-      DESIGN_ICONS.map((i) => i.id),
     );
     if (!sanitized) {
       return NextResponse.json({ error: "Invalid design configuration" }, { status: 400 });
