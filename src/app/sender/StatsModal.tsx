@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
+import type { TooltipContentProps } from "recharts";
 import { X, Trash2 } from "lucide-react";
 import { useDropdownReveal } from "@/lib/useDropdownReveal";
 import { useWebSocket } from "@/lib/useWebSocket";
@@ -78,12 +79,55 @@ type StatsData = { guestCategories: string[]; rsvps: RsvpRecord[] };
 
 type PieTooltipPayload = { payload: { label: string; value: number; color: string } };
 
-/** Themed replacement for recharts' default tooltip box, matching the app's surface/border tokens instead of the library's plain white default. */
-function PieSegmentTooltip({ active, payload }: { active?: boolean; payload?: PieTooltipPayload[] }) {
-  if (!active || !payload || payload.length === 0) return null;
-  const { label, value, color } = payload[0].payload;
+/**
+ * Themed replacement for recharts' default tooltip box, matching the app's
+ * surface/border tokens instead of the library's plain white default.
+ *
+ * The fade-out used to never play: recharts' own `TooltipBoundingBox`
+ * wrapper (which this content renders inside of) snaps `visibility: hidden`
+ * the instant its `active` prop goes false -- `visibility` can't be eased,
+ * so it hard-cuts regardless of any CSS animation class on the content
+ * underneath. The fix spans both this component and its parent
+ * (`StatsModal`):
+ *   - the parent tracks real hover itself via `Pie`'s onMouseEnter/Leave
+ *     (`hovering`, instant) and passes a *delayed* copy as an explicit
+ *     `active` override on <Tooltip> (`isActive` here) -- recharts documents
+ *     `active` as force-showing the tooltip regardless of its own internal
+ *     mouse tracking, which is what keeps `visibility: visible` for the
+ *     ~150ms this component's own exit animation needs.
+ *   - this component switches to the `dropdown-reveal-out` class the moment
+ *     `hovering` (the undelayed signal) goes false, so the fade-out starts
+ *     immediately and finishes right around when `isActive` finally flips
+ *     and the ancestor's `visibility: hidden` would otherwise cut it off.
+ */
+function PieSegmentTooltip({
+  isActive,
+  hovering,
+  payload,
+}: {
+  isActive?: boolean;
+  hovering: boolean;
+  payload?: PieTooltipPayload[];
+}) {
+  const current = payload && payload.length > 0 ? payload[0].payload : null;
+  // Adjusting state during render (React's documented pattern for deriving
+  // state from a prop change, not an effect) rather than in a useEffect --
+  // an effect would fire a render, THEN a second cascading render to apply
+  // it, which is one extra frame of the old segment's data showing during
+  // the exit fade. Guarded so it only fires on a genuine change, not every
+  // render.
+  const [lastShown, setLastShown] = useState(current);
+  if (current && current !== lastShown) setLastShown(current);
+  const shown = current ?? lastShown;
+
+  if (!isActive || !shown) return null;
+  const animationClass = hovering ? "dropdown-reveal" : "dropdown-reveal-out";
+
+  const { label, value, color } = shown;
   return (
-    <div className="flex items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-sm shadow-lg">
+    <div
+      className={`${animationClass} flex items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-sm shadow-lg`}
+    >
       <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} aria-hidden="true" />
       <span className="font-semibold text-[var(--color-text-primary)]">{value}</span>
       <span className="text-[var(--color-text-muted)]">{label}</span>
@@ -99,6 +143,14 @@ export function StatsModal({ event, isOpen, onClose }: { event: EventRecord; isO
   // second Modal, since this view is already a modal and stacking two
   // backdrops means one stray click can close both.
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  // Tracked ourselves via Pie's own mouse events rather than trusting
+  // recharts' internal hover state -- see PieSegmentTooltip's doc comment.
+  // `pieHovering` is instant (drives which segment shows); `activeTooltip`
+  // lags it by useDropdownReveal's own exit delay and is passed as an
+  // explicit `active` override on <Tooltip>, which is what keeps recharts'
+  // wrapper visible long enough for the exit fade to actually play.
+  const [pieHovering, setPieHovering] = useState(false);
+  const { shouldRender: activeTooltip } = useDropdownReveal(pieHovering);
   const isDark = useIsDarkTheme();
   const { messagesByType } = useWebSocket();
   const dbChanged = messagesByType["db-changed"];
@@ -207,145 +259,205 @@ export function StatsModal({ event, isOpen, onClose }: { event: EventRecord; isO
           </button>
         </div>
 
-        {error && <p className="text-sm text-[var(--color-danger)]">{error}</p>}
-        {!data && !error && <p className="text-sm text-[var(--color-text-muted)]">Loading...</p>}
+        {/* The "-open" class is applied unconditionally once mounted -- the
+            grid row track itself is what's eased (0fr -> 1fr), so the actual
+            smoothing happens automatically on any content-height change
+            underneath, with no JS-tracked height value that could go stale.
+            See globals.css for why an earlier ResizeObserver-based version
+            of this was the cause of a real bug (a stuck-small height +
+            overflow:hidden silently clipping the whole card blank). */}
+        <div className="stats-modal-height-transition stats-modal-height-transition-open">
+          <div>
+            {error && <p className="text-sm text-[var(--color-danger)]">{error}</p>}
+            {!data && !error && <p className="text-sm text-[var(--color-text-muted)]">Loading...</p>}
 
-        {data && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="flex flex-col items-center">
-              {total === 0 ? (
-                <p className="py-16 text-sm text-[var(--color-text-muted)]">
-                  No RSVPs yet -- the chart will fill in as responses come in.
-                </p>
-              ) : (
-                <>
-                  <div className="h-64 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={chartData}
-                          dataKey="value"
-                          nameKey="category"
-                          innerRadius="55%"
-                          outerRadius="85%"
-                          paddingAngle={2}
-                          stroke="var(--color-surface-1)"
-                          strokeWidth={2}
-                        >
+            {data && (
+              // key forces a fresh mount (and therefore a fresh
+              // stats-content-swap-in fade-in) whenever the view actually
+              // switches between the empty and populated layouts -- without
+              // it React would just patch the existing DOM in place and the
+              // content would appear instantly rather than fading.
+              <div key={total === 0 ? "empty" : "populated"} className="stats-content-swap-in">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  <div className="flex flex-col items-center">
+                    {total === 0 ? (
+                      <p className="py-16 text-sm text-[var(--color-text-muted)]">
+                        No RSVPs yet -- the chart will fill in as responses come in.
+                      </p>
+                    ) : (
+                      <>
+                        <div className="h-64 w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={chartData}
+                                dataKey="value"
+                                nameKey="category"
+                                innerRadius="55%"
+                                outerRadius="85%"
+                                paddingAngle={2}
+                                stroke="var(--color-surface-1)"
+                                strokeWidth={2}
+                                onMouseEnter={() => setPieHovering(true)}
+                                onMouseLeave={() => setPieHovering(false)}
+                              >
+                                {chartData.map((d) => (
+                                  <Cell key={d.category} fill={d.color} />
+                                ))}
+                              </Pie>
+                              {/* isAnimationActive={false} on purpose -- recharts
+                                  by default eases the tooltip's position from the
+                                  chart's (0,0) origin to the cursor on every
+                                  hover, which reads as the popup "flying in" from
+                                  the top-left corner each time. Disabling it snaps
+                                  the tooltip straight to the correct spot; the pie
+                                  slices themselves are unaffected, that's a
+                                  separate animation.
+                                  `active={activeTooltip}` is an explicit override
+                                  (recharts keeps a force-active tooltip visible
+                                  regardless of its own internal state) -- it lags
+                                  real hover by the exit-fade's own delay so
+                                  PieSegmentTooltip's dropdown-reveal-out has time
+                                  to actually play before recharts' wrapper would
+                                  otherwise hard-cut it via `visibility: hidden`.
+                                  `content` is a render function (not a bare
+                                  element) so `hovering` -- our own instant signal,
+                                  not one recharts knows about -- can ride along
+                                  next to the `payload` recharts injects. */}
+                              <Tooltip
+                                content={(props: TooltipContentProps) => {
+                                  // recharts' own payload entries carry lots of
+                                  // chart-internal fields we don't need -- pull
+                                  // out just what PieSegmentTooltip actually uses,
+                                  // sourced from each Cell's own data object.
+                                  const first = props.payload?.[0]?.payload as
+                                    | { label: string; value: number; color: string }
+                                    | undefined;
+                                  return (
+                                    <PieSegmentTooltip
+                                      isActive={activeTooltip}
+                                      hovering={pieHovering}
+                                      payload={first ? [{ payload: first }] : undefined}
+                                    />
+                                  );
+                                }}
+                                isAnimationActive={false}
+                                active={activeTooltip}
+                              />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                        {/* Direct labels + legend, not just chart-hover tooltips --
+                            required relief per the dataviz skill for any slot
+                            sitting in the CVD floor band or below chart-surface
+                            contrast (gold, in both modes here), and also the
+                            "table view" fallback for a screen reader or a reader
+                            who never hovers. */}
+                        <ul className="mt-4 flex flex-wrap justify-center gap-x-4 gap-y-1.5 text-sm">
                           {chartData.map((d) => (
-                            <Cell key={d.category} fill={d.color} />
+                            <li key={d.category} className="flex items-center gap-1.5">
+                              <span
+                                className="h-2.5 w-2.5 rounded-full"
+                                style={{ backgroundColor: d.color }}
+                                aria-hidden="true"
+                              />
+                              <span className="text-[var(--color-text-primary)] font-medium">{d.value}</span>
+                              <span className="text-[var(--color-text-muted)]">{d.label}</span>
+                            </li>
                           ))}
-                        </Pie>
-                        <Tooltip content={<PieSegmentTooltip />} />
-                      </PieChart>
-                    </ResponsiveContainer>
+                        </ul>
+                      </>
+                    )}
                   </div>
-                  {/* Direct labels + legend, not just chart-hover tooltips --
-                      required relief per the dataviz skill for any slot
-                      sitting in the CVD floor band or below chart-surface
-                      contrast (gold, in both modes here), and also the
-                      "table view" fallback for a screen reader or a reader
-                      who never hovers. */}
-                  <ul className="mt-4 flex flex-wrap justify-center gap-x-4 gap-y-1.5 text-sm">
-                    {chartData.map((d) => (
-                      <li key={d.category} className="flex items-center gap-1.5">
-                        <span
-                          className="h-2.5 w-2.5 rounded-full"
-                          style={{ backgroundColor: d.color }}
-                          aria-hidden="true"
-                        />
-                        <span className="text-[var(--color-text-primary)] font-medium">{d.value}</span>
-                        <span className="text-[var(--color-text-muted)]">{d.label}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </div>
 
-            <div>
-              <h3 className="text-sm font-semibold text-[var(--color-text-muted)] uppercase tracking-wide mb-3">
-                Guest Breakdown
-              </h3>
-              {allRsvps.length === 0 ? (
-                <p className="text-sm text-[var(--color-text-muted)]">No RSVPs yet.</p>
-              ) : (
-                <ul className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                  {allRsvps.map((rsvp, index) => (
-                    <li
-                      key={rsvp.id}
-                      className="flex flex-col gap-1.5 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] px-3 py-2.5"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-[var(--color-text-primary)] truncate">
-                          {rsvp.guest_name}
-                        </span>
-                        {confirmingId === rsvp.id ? (
-                          <span className="flex shrink-0 items-center gap-2 text-xs">
-                            <span className="text-[var(--color-text-muted)]">Remove?</span>
-                            <button
-                              type="button"
-                              onClick={() => deleteRsvp(rsvp, index)}
-                              className="font-semibold text-[var(--color-danger)] hover:underline"
-                            >
-                              Yes
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setConfirmingId(null)}
-                              className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-                            >
-                              Cancel
-                            </button>
-                          </span>
-                        ) : (
-                          <ThemedTooltip label="Remove this RSVP (shift-click to skip the confirm)">
-                            <button
-                              type="button"
-                              aria-label={`Remove ${rsvp.guest_name}'s RSVP`}
-                              // Shift-click skips the confirm, same shortcut
-                              // the admin tables already use for deletes.
-                              onClick={(e) =>
-                                e.shiftKey ? deleteRsvp(rsvp, index) : setConfirmingId(rsvp.id)
-                              }
-                              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-1)] hover:text-[var(--color-danger)] transition-colors"
-                            >
-                              <Trash2 className="h-4 w-4" strokeWidth={2} />
-                            </button>
-                          </ThemedTooltip>
-                        )}
-                      </div>
-                      {rsvp.attending ? (
-                        <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--color-text-muted)]">
-                          {categories.map((category) => {
-                            const count = rsvp.category_counts[category] ?? 0;
-                            return (
-                              <span key={category} className="whitespace-nowrap">
-                                <span className="font-semibold text-[var(--color-text-primary)]">{count}</span>{" "}
-                                {categoryLabelForCount(category, count)}
+                  <div>
+                    <h3 className="text-sm font-semibold text-[var(--color-text-muted)] uppercase tracking-wide mb-3">
+                      Guest Breakdown
+                    </h3>
+                    {allRsvps.length === 0 ? (
+                      <p className="text-sm text-[var(--color-text-muted)]">No RSVPs yet.</p>
+                    ) : (
+                      <ul className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                        {allRsvps.map((rsvp, index) => (
+                          <li
+                            key={rsvp.id}
+                            className="flex flex-col gap-1.5 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] px-3 py-2.5"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-medium text-[var(--color-text-primary)] truncate">
+                                {rsvp.guest_name}
                               </span>
-                            );
-                          })}
-                        </span>
-                      ) : (
-                        // Same swatch colour as the pie's own slice, so the
-                        // two halves of this view read as one thing.
-                        <span className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
-                          <span
-                            className="h-2 w-2 rounded-full"
-                            style={{ backgroundColor: declinedColor }}
-                            aria-hidden="true"
-                          />
-                          {DECLINED_LABEL}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+                              {confirmingId === rsvp.id ? (
+                                <span className="flex shrink-0 items-center gap-2 text-xs">
+                                  <span className="text-[var(--color-text-muted)]">Remove?</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteRsvp(rsvp, index)}
+                                    className="font-semibold text-[var(--color-danger)] hover:underline"
+                                  >
+                                    Yes
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmingId(null)}
+                                    className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+                                  >
+                                    Cancel
+                                  </button>
+                                </span>
+                              ) : (
+                                <ThemedTooltip label="Remove this RSVP (shift-click to skip the confirm)">
+                                  <button
+                                    type="button"
+                                    aria-label={`Remove ${rsvp.guest_name}'s RSVP`}
+                                    // Shift-click skips the confirm, same shortcut
+                                    // the admin tables already use for deletes.
+                                    onClick={(e) =>
+                                      e.shiftKey ? deleteRsvp(rsvp, index) : setConfirmingId(rsvp.id)
+                                    }
+                                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-1)] hover:text-[var(--color-danger)] transition-colors"
+                                  >
+                                    <Trash2 className="h-4 w-4" strokeWidth={2} />
+                                  </button>
+                                </ThemedTooltip>
+                              )}
+                            </div>
+                            {rsvp.attending ? (
+                              <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--color-text-muted)]">
+                                {categories.map((category) => {
+                                  const count = rsvp.category_counts[category] ?? 0;
+                                  return (
+                                    <span key={category} className="whitespace-nowrap">
+                                      <span className="font-semibold text-[var(--color-text-primary)]">
+                                        {count}
+                                      </span>{" "}
+                                      {categoryLabelForCount(category, count)}
+                                    </span>
+                                  );
+                                })}
+                              </span>
+                            ) : (
+                              // Same swatch colour as the pie's own slice, so the
+                              // two halves of this view read as one thing.
+                              <span className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+                                <span
+                                  className="h-2 w-2 rounded-full"
+                                  style={{ backgroundColor: declinedColor }}
+                                  aria-hidden="true"
+                                />
+                                {DECLINED_LABEL}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>,
     document.body,

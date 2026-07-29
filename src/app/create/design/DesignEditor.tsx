@@ -59,6 +59,7 @@ import { SelectionFontPicker } from "@/components/design/SelectionFontPicker";
 import { ColorFieldGroup } from "@/components/design/ColorField";
 import { useToast } from "@/components/ui/Toast";
 import { useOptimisticActions } from "@/lib/optimistic";
+import { useWebSocket } from "@/lib/useWebSocket";
 import type { EventRecord } from "@/lib/types";
 
 type Tab = "templates" | "elements" | "layers" | "style" | "details";
@@ -136,6 +137,34 @@ export default function DesignEditor({ initialEvent }: { initialEvent?: EventRec
     // eslint-disable-next-line react-hooks/set-state-in-effect -- see comment above
     setReceiverOrigin(window.location.origin);
   }, []);
+
+  const { messagesByType } = useWebSocket();
+  const dbChanged = messagesByType["db-changed"];
+
+  // Live-syncs *only* the published flag from elsewhere (another tab
+  // publishing, or this tab's own optimistic Publish already applied it
+  // locally) -- never a full re-fetch/overwrite here. This page holds the
+  // live Fabric canvas, an undo/redo history stack, and an `isDirty` flag
+  // guarding a beforeunload warning; blindly reloading `event`/`colors`/
+  // `canvasJSON` on any live db-changed would stomp in-progress design work
+  // (or the undo stack) the instant a guest submits an RSVP elsewhere,
+  // which is the opposite of what a "smooth, non-scary" live-update pass is
+  // supposed to feel like. Same conservative scope as EventEditor's own
+  // sync.
+  useEffect(() => {
+    if (!event || !dbChanged || dbChanged.kind !== "events") return;
+    fetch(`/api/events/${event.slug}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((fresh: EventRecord | null) => {
+        if (fresh && fresh.published !== event.published) {
+          setEvent((prev) => (prev ? { ...prev, published: fresh.published } : prev));
+        }
+      })
+      .catch(() => {
+        // Self-corrects on the next db-changed broadcast or page load.
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbChanged]);
 
   const canvasWidth = event?.design_config?.canvasWidth ?? DEFAULT_CANVAS_WIDTH;
   const canvasHeight = event?.design_config?.canvasHeight ?? DEFAULT_CANVAS_HEIGHT;

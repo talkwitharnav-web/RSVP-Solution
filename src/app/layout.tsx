@@ -53,6 +53,7 @@ import {
   Philosopher,
 } from "next/font/google";
 import { GlobalSettingsToggles } from "@/components/ui/GlobalSettingsToggles";
+import { SessionWatcher } from "@/components/ui/SessionWatcher";
 import { ToastProvider } from "@/components/ui/Toast";
 import "./globals.css";
 
@@ -259,6 +260,7 @@ export default function RootLayout({
             design editor, which previously had no notification host at all. */}
         <ToastProvider>
           <GlobalSettingsToggles />
+          <SessionWatcher />
           {children}
         </ToastProvider>
       </body>

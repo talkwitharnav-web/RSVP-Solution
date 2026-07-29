@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { initDb, pool } from "@/lib/db";
-import { requireAdmin, requireSender } from "@/lib/auth";
-import { verifySessionToken, SENDER_SESSION_COOKIE_NAME } from "@/lib/session";
+import { requireSender } from "@/lib/auth";
+import { verifySessionToken, ADMIN_SESSION_COOKIE_NAME, SENDER_SESSION_COOKIE_NAME } from "@/lib/session";
 import { broadcastDbChanged } from "@/lib/ws-broadcast";
 import { isAcceptedImageDataUrl, isAcceptedImageDataUrlSize } from "@/lib/image-upload";
 import { parseGuestCategories } from "@/lib/guest-categories";
@@ -201,15 +201,37 @@ export async function PUT(
   return NextResponse.json(result.rows[0]);
 }
 
+/**
+ * Deletes an invitation -- an admin (Access DB's RSVP Links table) or the
+ * owning sender (the invitation gallery's own delete button) can do this.
+ * A sender-authenticated caller is ownership-checked the same way PUT above
+ * is, so a sender account can't delete another sender's invitation by
+ * guessing/reusing a slug; an admin session bypasses the ownership check
+ * entirely, matching every other admin-gated mutation in Access DB.
+ */
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ slug: string }> },
 ) {
-  const auth = await requireAdmin();
-  if (!auth.ok) return auth.response;
+  const cookieStore = await cookies();
+  const adminSession = verifySessionToken(cookieStore.get(ADMIN_SESSION_COOKIE_NAME)?.value);
+  const isAdmin = adminSession?.type === "admin";
 
   await initDb();
   const { slug } = await params;
+
+  if (!isAdmin) {
+    const auth = await requireSender();
+    if (!auth.ok) return auth.response;
+
+    const existing = await pool.query(`SELECT created_by FROM events WHERE slug = $1`, [slug]);
+    if (existing.rows.length === 0) {
+      return NextResponse.json({ error: "Event not found" }, { status: 404 });
+    }
+    if (existing.rows[0].created_by !== auth.userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+  }
 
   const result = await pool.query(`DELETE FROM events WHERE slug = $1 RETURNING slug`, [slug]);
   if (result.rows.length === 0) {

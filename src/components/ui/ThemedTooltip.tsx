@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useLayoutEffect, FC, ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useDropdownReveal } from "@/lib/useDropdownReveal";
 
 /**
@@ -15,6 +16,18 @@ import { useDropdownReveal } from "@/lib/useDropdownReveal";
  * animates `transform`, and a CSS animation overrides an inline `transform`,
  * which silently discarded the centring and left every tooltip offset by
  * half its own width.
+ *
+ * Portaled to document.body (2026-07-29) -- `position: fixed` is only fixed
+ * to the *viewport* if no ancestor has a `transform`/`filter`/`will-change`.
+ * Modal.tsx's own reveal animation sets `animation: modal-panel-in ... both`,
+ * and `both` keeps the final `transform: scale(1) translateY(0)` applied to
+ * the panel for its entire open lifetime -- not just mid-animation. That
+ * turns the modal panel into the containing block for any "fixed" tooltip
+ * rendered inside it, so the tooltip's viewport-relative coordinates land
+ * miles outside the panel's own box, inflating the panel's scrollable
+ * content and popping both scrollbars on hover. Portaling escapes the
+ * transformed ancestor entirely, same fix `HoverButtonTooltip` in
+ * InvitationGallery.tsx already uses for this exact reason.
  */
 export const ThemedTooltip: FC<{
   label: string;
@@ -100,23 +113,25 @@ export const ThemedTooltip: FC<{
       onBlur={hide}
     >
       {children}
-      {shouldRender && (
-        <div
-          style={{ position: "fixed", top: placement.top ?? anchor.y, ...outerStyle }}
-          className="z-50 w-max pointer-events-none"
-        >
+      {shouldRender &&
+        createPortal(
           <div
-            ref={tooltipRef}
-            role="tooltip"
-            // Wraps rather than running off the screen: tooltips also surface
-            // full values that were truncated in the UI (long names,
-            // filenames), which can be far longer than a hand-written label.
-            className={`${animationClass} max-w-xs break-words px-2.5 py-1.5 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-1)] text-[var(--color-text-primary)] text-xs font-medium shadow-lg`}
+            style={{ position: "fixed", top: placement.top ?? anchor.y, ...outerStyle }}
+            className="z-50 w-max pointer-events-none"
           >
-            {label}
-          </div>
-        </div>
-      )}
+            <div
+              ref={tooltipRef}
+              role="tooltip"
+              // Wraps rather than running off the screen: tooltips also surface
+              // full values that were truncated in the UI (long names,
+              // filenames), which can be far longer than a hand-written label.
+              className={`${animationClass} max-w-xs break-words px-2.5 py-1.5 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-1)] text-[var(--color-text-primary)] text-xs font-medium shadow-lg`}
+            >
+              {label}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };

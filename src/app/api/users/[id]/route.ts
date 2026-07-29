@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { initDb, pool } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
-import { broadcastDbChanged } from "@/lib/ws-broadcast";
+import { broadcastDbChanged, broadcastUserDeleted } from "@/lib/ws-broadcast";
 import {
   bodyTooLarge,
   boundedText,
@@ -81,5 +81,6 @@ export async function DELETE(
   }
 
   broadcastDbChanged("users");
+  broadcastUserDeleted(id);
   return NextResponse.json({ message: "User deleted successfully" });
 }

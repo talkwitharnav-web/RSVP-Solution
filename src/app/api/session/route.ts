@@ -13,7 +13,12 @@ export async function GET() {
   const isAdmin = adminPayload?.type === "admin";
 
   const senderPayload = verifySessionToken(cookieStore.get(SENDER_SESSION_COOKIE_NAME)?.value);
-  const sender = senderPayload?.type === "sender" ? { username: senderPayload.username } : null;
+  // userId included so a client can recognize a `user-deleted` WS broadcast
+  // naming its own account (see src/lib/ws-broadcast.ts's
+  // broadcastUserDeleted) -- the signed cookie already carries it, this just
+  // surfaces it to the browser the same way username already was.
+  const sender =
+    senderPayload?.type === "sender" ? { username: senderPayload.username, userId: senderPayload.userId } : null;
 
   return NextResponse.json({
     authenticated: isAdmin || !!sender,

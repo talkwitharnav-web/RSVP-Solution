@@ -10,6 +10,7 @@ import { CopyableValue } from "@/components/ui/CopyableValue";
 import { isAcceptedImageType, isHeicFile, convertHeicToJpeg, prepareCardImage } from "@/lib/image-upload";
 import { formatGuestCategories } from "@/lib/guest-categories";
 import { useOptimisticActions } from "@/lib/optimistic";
+import { useWebSocket } from "@/lib/useWebSocket";
 import type { EventRecord } from "@/lib/types";
 
 function toDatetimeLocalValue(iso: string | null): string {
@@ -48,6 +49,34 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
   // server refuses, rather than making the sender watch a round trip --
   // see lib/optimistic.ts.
   const { run, hasPending } = useOptimisticActions();
+  const { messagesByType } = useWebSocket();
+  const dbChanged = messagesByType["db-changed"];
+
+  // Live-syncs *only* the published flag from elsewhere (another tab, or
+  // this same tab's own optimistic Publish already applied it locally) --
+  // deliberately not a full re-fetch/overwrite of the form. This page has
+  // real text fields the sender may be mid-typing into (title, description,
+  // ...), and a live update landing mid-edit would silently discard
+  // keystrokes, which is exactly the "sudden, scary" feeling the height-
+  // transition and content-fade work elsewhere in this app was trying to
+  // get away from. A lightweight status-only fetch avoids clobbering local
+  // edits while still keeping the Published badge/receiver-link honest if
+  // published elsewhere.
+  useEffect(() => {
+    if (!dbChanged || dbChanged.kind !== "events") return;
+    fetch(`/api/events/${event.slug}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((fresh: EventRecord | null) => {
+        if (fresh && fresh.published !== event.published) {
+          setEvent((prev) => ({ ...prev, published: fresh.published }));
+        }
+      })
+      .catch(() => {
+        // A missed live status update self-corrects on the next db-changed
+        // broadcast or page load -- not worth surfacing as an error.
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbChanged]);
 
   // window.location isn't available during SSR -- the copyable receiver
   // link needs the real origin, not a guess, so it's read on mount rather

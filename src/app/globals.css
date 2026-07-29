@@ -293,6 +293,37 @@ html[data-ui-size="big"] {
   -webkit-backdrop-filter: blur(4px);
 }
 
+/* StatsModal.tsx's empty<->populated content swap (e.g. deleting the last
+   RSVP, or a guest's first RSVP arriving live via db-changed).
+   grid-template-rows 0fr->1fr, not a JS-measured height: an earlier version
+   tracked the content's pixel height via ResizeObserver and eased that
+   number directly, but any gap between a real size change and the observer
+   catching up left the wrapper's explicit height stuck below the content's
+   actual size -- combined with overflow:hidden, that silently clipped the
+   entire card to a sliver, which is exactly the "blank card" bug this
+   replaced. The grid trick has no JS state to go stale: the row track
+   itself eases from 0fr to 1fr, and 1fr always means "the content's real
+   size," full stop, so there is no stuck-small-height failure mode to hit. */
+.stats-modal-height-transition {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.stats-modal-height-transition-open {
+  grid-template-rows: 1fr;
+}
+.stats-modal-height-transition > div {
+  overflow: hidden;
+  min-height: 0;
+}
+@keyframes stats-content-swap-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.stats-content-swap-in {
+  animation: stats-content-swap-in 0.22s ease-out 0.1s both;
+}
+
 /* Toast.tsx pop-in/pop-out. */
 @keyframes notification-pop-in {
   0% { opacity: 0; transform: translateY(-16px) scale(0.9); }
