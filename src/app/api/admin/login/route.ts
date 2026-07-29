@@ -10,13 +10,12 @@ import {
 import { rateLimit } from "@/lib/rate-limit";
 import { bodyTooLarge, SMALL_BODY_LIMIT } from "@/lib/validation";
 
-// Hardcoded fallback admin credentials, matching the reference project's own
-// pre-public-launch approach — see CLAUDE.md. ADMIN_USERNAME/ADMIN_PASSWORD
-// env vars override them, so a real deployment can supply real credentials
-// without a code change (the hardcoded pair is in source control and is
-// therefore public to anyone who has seen this repo).
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "darkglory";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "R$vp@dm!n";
+// No hardcoded fallback -- this repo is public, so anything committed here
+// is permanently public too (even a later commit removing it doesn't erase
+// old commits). ADMIN_USERNAME/ADMIN_PASSWORD must be set in .env.local
+// (gitignored) or admin login refuses every attempt.
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 /**
  * Length-independent, constant-time string comparison. A plain `!==` leaks
@@ -46,6 +45,12 @@ export async function POST(req: Request) {
 
   if (bodyTooLarge(req, SMALL_BODY_LIMIT)) {
     return NextResponse.json({ error: "Request body too large" }, { status: 413 });
+  }
+
+  // Fail closed rather than falling back to any hardcoded value -- see the
+  // note above on why this repo can never carry one again.
+  if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
+    return NextResponse.json({ error: "Admin login is not configured" }, { status: 503 });
   }
 
   const body = await req.json().catch(() => ({}));

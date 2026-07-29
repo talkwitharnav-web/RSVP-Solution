@@ -20,14 +20,15 @@ Next.js 16 App Router / React 19 / TypeScript / Tailwind v4 / Postgres via raw
 `pg` / custom `server.js` for a raw WebSocket / **port 3001** (3000 belongs to
 the user's other project).
 
-Four `EventKind`s exist in the type system, but only **two currently have a
+Three `EventKind`s exist in the type system, but only **two currently have a
 creation UI**: `custom_card` (bring-your-own-card) and `designed_template`
 (the Fabric.js canvas editor at `/create/design`, with
 `/create/design/[slug]` as the permanent edit link) — both reached from
-`NewInvitationModal`/`/sender/landing`. `hosted_template` is a real, wanted
-kind per the user but currently has no way to be created (its old route was
-deleted as dead nav — see §2). `external_link` is confirmed **not wanted** —
-its own route was deleted the same way, and there's no plan to rebuild it.
+`NewInvitationModal`/`/sender/landing`. `external_link` is confirmed **not
+wanted** — its own route was deleted as dead nav, and there's no plan to
+rebuild it. `hosted_template` was a fourth kind but was **removed entirely**
+2026-07-29 (type, DB constraint, admin label, seed data all gone) after the
+user confirmed it wasn't wanted — don't reintroduce it without asking again.
 
 ### Getting running
 
@@ -37,7 +38,10 @@ npm run start:all          # docker + postgres + dev server, one command
 npm run dev                # http://localhost:3001
 ```
 
-Admin login is at `/` (localhost only): `darkglory` / `R$vp@dm!n`.
+Admin login is at `/` (localhost only). Requires `ADMIN_USERNAME`/
+`ADMIN_PASSWORD` set in `.env.local` — there is no hardcoded fallback (see
+`SYSTEM_MEMORY.md`'s "Auth" section for why). Credentials aren't recorded in
+the docs — ask the user directly if genuinely needed.
 
 Always finish with `npx tsc --noEmit` and `npx eslint .` — both currently pass
 clean with zero warnings, and the project treats that as an invariant.
@@ -83,7 +87,19 @@ Everything below is **done and verified against a running app**, not theoretical
   additive.
 - **Two dead routes removed (2026-07-29).** `/create/link` and
   `/create/template` are gone outright (confirmed zero references anywhere
-  else first). This does *not* mean `hosted_template` is dead — see §0 and §2.
+  else first).
+- **`hosted_template` removed entirely (2026-07-29)**, reversing an earlier
+  same-day plan to give it a new creation entry point — the user confirmed
+  on reflection it wasn't wanted. Type, DB constraint, admin label, and seed
+  data are all gone.
+- **`qrcode`/`@types/qrcode` removed (2026-07-29)** — installed since day one,
+  never imported anywhere, user saw no use for it in this project.
+- **Admin login has no hardcoded fallback anymore (2026-07-29).** The repo
+  turned out to be genuinely public, which permanently exposed the original
+  committed credential pair in git history. `ADMIN_USERNAME`/`ADMIN_PASSWORD`
+  must now be set in `.env.local`, or admin login returns 503. New
+  credentials were set directly in `.env.local`, never written to any md
+  file. `SESSION_SECRET` was also generated and set the same way.
 - **Optimistic UI everywhere it makes sense** (`src/lib/optimistic.ts`) — saves,
   publishes, deletes (RSVP rows **and** whole invitations), renames, and the
   guest's own RSVP submission all land instantly and roll back if the server
@@ -101,26 +117,12 @@ They drive priorities by using the app and reporting what's wrong. **Do not
 assume this list is what they want.** Every significant improvement so far
 started from their hands-on feedback, not from a backlog.
 
-### B. `hosted_template` needs a real creation entry point
-
-Confirmed 2026-07-29 as genuinely wanted ("hosted template and that is
-genuinely useful in real world"), but its only creation route
-(`/create/template`) was deleted alongside `/create/link` as dead nav — both
-were unreachable from any nav/modal, and at the time it wasn't clear
-`hosted_template` still mattered. It does. The type itself, its DB
-constraint, `EventEditor`, and `GuestEventView` rendering are all still
-fully intact — only the creation UI is gone. The natural fix is wiring a
-third option into `NewInvitationModal` alongside "Design in our editor" and
-"Bring your own card," not resurrecting the old standalone page verbatim
-(check whether its old form still matches the current theme-token/UI
-conventions before reusing any of it wholesale).
-
-### C. Guests never see the event details on a designed card
+### B. Guests never see the event details on a designed card
 
 Still open, still needs the user's call, not implemented:
 
 > Title, host, date, location and description are shown above the card for
-> `custom_card`/`hosted_template`. On a `designed_template` card they appear
+> `custom_card`. On a `designed_template` card they appear
 > nowhere — the guest sees only the canvas and the RSVP form. Unless the
 > sender manually adds a text box saying when and where, guests are never
 > told. `/sender/landing` promises "add the essentials — time, place, host,"
@@ -134,7 +136,7 @@ point, not a cage" — they'd be ordinary elements afterwards); (3) leave as-is
 but relabel the Details tab so it's clearly for the dashboard/records, not
 guests.
 
-### D. Artwork for templates *(highest-value if the editor still feels sparse)*
+### C. Artwork for templates *(highest-value if the editor still feels sparse)*
 
 `public/design-assets/` is still **empty**. Templates compose from
 `lucide-react` line icons plus 4 hand-authored SVG motifs. Constraints that
@@ -144,7 +146,7 @@ level removed, icons always `lucide-react`, never emoji. New artwork should
 be hand-authored or vetted line-by-line — ask before pulling in any external
 asset source.
 
-### E. Remaining editor gaps
+### D. Remaining editor gaps
 
 1. **Line height + letter spacing** in the text panel — the obvious omissions
    now that everything else is exposed.
@@ -152,15 +154,13 @@ asset source.
    `canvasHeight` are already stored per event, so the data model is ready
    for portrait/square/landscape.
 
-### F. Loose ends
+### E. Loose ends
 
 - **RSVP `questions` can't be edited after creation.** `external_url` now
   can; same shape of fix in `PUT /api/events/[slug]`.
 - **An RSVP row can be deleted but not edited** — both by the guest (one
   submission only) and by the sender (delete only, no edit). An edit path is
   the obvious next step if wrong answers keep happening.
-- **`qrcode` is installed and never imported.** Wiring it onto the guest page
-  is a small, self-contained win.
 - **No un-publish.** One-directional by design; the user has never asked to
   change it. Worth one question rather than assuming.
 - **No CSV export / broader per-guest management** beyond the Statistics
@@ -173,7 +173,7 @@ asset source.
   `custom_card`, despite designed cards having everything needed to render a
   real thumbnail (the same read-only canvas the guest page already uses).
 
-### G. Housekeeping the user may want
+### F. Housekeeping the user may want
 
 - **Scratch test data** in the dev database from earlier automated runs.
   **Offer to clean, don't just do it** — deleting rows is destructive and
@@ -181,10 +181,16 @@ asset source.
   in testing. As of 2026-07-29 the two `external_link` rows created during
   this session's own testing were deleted with the user's explicit
   confirmation; anything older hasn't been touched.
-- **Before any deployment**: `SESSION_SECRET` still falls back to a committed
-  dev value (a production build throws rather than starting insecure), and
-  admin credentials default to the committed pair unless `ADMIN_USERNAME` /
-  `ADMIN_PASSWORD` are set.
+- **`SESSION_SECRET` and admin credentials are already handled (2026-07-29).**
+  `SESSION_SECRET` is set in `.env.local` (a production build still throws if
+  it's ever unset). Admin login has **no hardcoded fallback at all** anymore
+  — `ADMIN_USERNAME`/`ADMIN_PASSWORD` must be set in `.env.local` or admin
+  login returns 503. This was forced by discovering the repo is genuinely
+  public, which permanently exposed the original committed pair in git
+  history; the fix stops it from being the *live* credential going forward,
+  it doesn't erase the historical record, and the user explicitly declined
+  rewriting git history to do so. Neither value is written in any md file —
+  ask the user directly if admin access is needed.
 - **No tests exist.** Verification scripts are deliberately written to a
   scratch directory and deleted after use rather than committed — see
   "Landmines" below for why they can't live in the project root at all, not

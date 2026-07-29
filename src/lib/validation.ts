@@ -18,7 +18,7 @@ export const MAX_ANSWER_LENGTH = 2000;
 /** Cap on how many guest categories one event can define. */
 export const MAX_GUEST_CATEGORIES = 12;
 export const MAX_GUEST_CATEGORY_LENGTH = 40;
-/** Cap on how many ad hoc RSVP questions one hosted_template event can define. */
+/** Cap on how many ad hoc RSVP questions one event can define. */
 export const MAX_QUESTIONS = 20;
 export const MAX_QUESTION_LABEL_LENGTH = 200;
 

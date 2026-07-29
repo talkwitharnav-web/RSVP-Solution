@@ -35,7 +35,6 @@ import type { UserRecord, EventRecord, EventKind } from "@/lib/types";
 // custom_card and designed_template as "Hosted Template").
 const EVENT_KIND_LABELS: Record<EventKind, string> = {
   external_link: "External Link",
-  hosted_template: "Hosted Template",
   custom_card: "Custom Card",
   designed_template: "Designed Template",
 };

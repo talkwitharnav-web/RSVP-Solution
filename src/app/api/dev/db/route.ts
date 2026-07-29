@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
 
   const sampleEvents = [
     {
-      kind: "hosted_template",
+      kind: "custom_card",
       title: "Jordan's Birthday Bash",
       host_name: "Jordan Lee",
       description: "Come celebrate!",
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
       external_url: "https://forms.gle/example",
     },
     {
-      kind: "hosted_template",
+      kind: "custom_card",
       title: "Sam's Housewarming",
       host_name: "Sam Osei",
       description: "New place, same great Sam",

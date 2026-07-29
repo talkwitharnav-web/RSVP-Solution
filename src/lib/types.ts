@@ -1,6 +1,6 @@
 import type { DesignConfig } from "./design-types";
 
-export type EventKind = "external_link" | "hosted_template" | "custom_card" | "designed_template";
+export type EventKind = "external_link" | "custom_card" | "designed_template";
 
 export interface RsvpQuestion {
   id: string;

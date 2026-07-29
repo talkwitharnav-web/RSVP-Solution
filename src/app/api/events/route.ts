@@ -15,37 +15,10 @@ import {
   MAX_SHORT_TEXT_LENGTH,
   MAX_LONG_TEXT_LENGTH,
   MAX_URL_LENGTH,
-  MAX_QUESTIONS,
-  MAX_QUESTION_LABEL_LENGTH,
 } from "@/lib/validation";
 import type { RsvpQuestion } from "@/lib/types";
 
-const VALID_KINDS = ["external_link", "hosted_template", "custom_card", "designed_template"];
-
-/**
- * Trims the ad hoc question list down to something bounded. Previously the
- * body's `questions` array was stored verbatim after only an Array.isArray
- * check, so a direct API call could persist thousands of questions (or a
- * single question with a multi-megabyte label) into the JSONB column, and
- * every guest loading the RSVP form would then have to render all of it.
- */
-function sanitizeQuestions(raw: unknown): RsvpQuestion[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.slice(0, MAX_QUESTIONS).flatMap((item, index) => {
-    if (typeof item !== "object" || item === null) return [];
-    const q = item as Record<string, unknown>;
-    const label = boundedText(q.label, MAX_QUESTION_LABEL_LENGTH);
-    if (!label) return [];
-    return [
-      {
-        id: boundedText(q.id, 64) || `q${index}`,
-        label,
-        type: q.type === "boolean" ? "boolean" : "text",
-        required: q.required === true,
-      } satisfies RsvpQuestion,
-    ];
-  });
-}
+const VALID_KINDS = ["external_link", "custom_card", "designed_template"];
 
 export async function POST(req: NextRequest) {
   const auth = await requireSender();
@@ -58,7 +31,7 @@ export async function POST(req: NextRequest) {
   await initDb();
   const body = await req.json();
 
-  const kind = VALID_KINDS.includes(body.kind) ? body.kind : "hosted_template";
+  const kind = VALID_KINDS.includes(body.kind) ? body.kind : "custom_card";
   const title = boundedText(body.title, MAX_TITLE_LENGTH);
   if (!title) {
     return NextResponse.json({ error: "Title is required" }, { status: 400 });
@@ -111,7 +84,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const questions: RsvpQuestion[] = kind === "hosted_template" ? sanitizeQuestions(body.questions) : [];
+  // No creation UI currently sets ad hoc questions for any kind, but the
+  // sanitizer/column stay in place -- see RsvpQuestion/RsvpForm.
+  const questions: RsvpQuestion[] = [];
 
   const insertValues = [
     kind,
