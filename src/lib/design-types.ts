@@ -66,8 +66,13 @@ const MAX_CANVAS_DIMENSION = 4000;
 
 // A canvas with several embedded photos could otherwise store an unbounded
 // blob -- same defense-in-depth posture as isAcceptedImageDataUrlSize() in
-// src/lib/image-upload.ts.
-export const MAX_CANVAS_JSON_BYTES = 2 * 1024 * 1024;
+// src/lib/image-upload.ts. Raised from 2MB once images started being
+// downscaled before being added (prepareImageForCanvas): the old cap was
+// below what a single full-size phone photo produced, so a legitimate design
+// would silently trip the empty-canvas fallback below and lose everything.
+// The editor also checks this bound before saving so a sender gets a real
+// error instead of a silent wipe; this remains the server-side backstop.
+export const MAX_CANVAS_JSON_BYTES = 8 * 1024 * 1024;
 
 function clampDimension(value: unknown, fallback: number): number {
   const n = Number(value);

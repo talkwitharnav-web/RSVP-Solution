@@ -4,16 +4,19 @@ import { useEffect, useRef, useState } from "react";
 import { useDropdownReveal } from "@/lib/useDropdownReveal";
 import type { HealthTier } from "@/app/api/health/route";
 
+// sizeBytes/imageStorageBytes/pool/ws are only returned to localhost callers
+// -- /api/health is unauthenticated (the pill renders on public pages) and
+// the app binds to the LAN, so those internals are withheld off-machine.
 type HealthResponse = {
   tier: HealthTier;
   db: {
     connected: boolean;
     latencyMs: number | null;
-    sizeBytes: number | null;
-    imageStorageBytes: number | null;
-    pool: { total: number; idle: number; waiting: number } | null;
+    sizeBytes?: number | null;
+    imageStorageBytes?: number | null;
+    pool?: { total: number; idle: number; waiting: number } | null;
   };
-  ws: { connectedClients: number | null };
+  ws?: { connectedClients: number | null };
 };
 
 // K/M/G/T, not KB/MB/GB/TB. Binary (1024-based) units, since that's what
@@ -227,7 +230,7 @@ export function HealthPin({
                   </dd>
                 </div>
               )}
-              {detailLevel === "full" && health.ws.connectedClients != null && (
+              {detailLevel === "full" && health.ws?.connectedClients != null && (
                 <div className="flex justify-between gap-3">
                   <dt className="text-[var(--color-text-muted)]">Live listeners</dt>
                   <dd className="text-[var(--color-text-primary)] font-medium">{health.ws.connectedClients}</dd>

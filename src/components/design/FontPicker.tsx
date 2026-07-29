@@ -35,9 +35,14 @@ const MOOD_ORDER: DesignFontMood[] = [
 export function FontPicker({
   value,
   onChange,
+  suggestedIds = [],
+  suggestedForName,
 }: {
   value: string;
   onChange: (fontPairId: string) => void;
+  /** Pairs that suit the current colour theme, shown first as a shortlist. */
+  suggestedIds?: string[];
+  suggestedForName?: string;
 }) {
   const groups = new Map<DesignFontMood, DesignFontPair[]>();
   for (const pair of DESIGN_FONT_PAIRS) {
@@ -46,47 +51,61 @@ export function FontPicker({
     groups.set(pair.mood, list);
   }
 
+  const suggested = suggestedIds
+    .map((id) => DESIGN_FONT_PAIRS.find((f) => f.id === id))
+    .filter((f): f is DesignFontPair => !!f);
+
+  const row = (f: DesignFontPair) => (
+    <button
+      key={f.id}
+      type="button"
+      onClick={() => onChange(f.id)}
+      className={`w-full rounded-[var(--radius-sm)] border-2 px-3 py-2 text-left transition-colors ${
+        value === f.id
+          ? "border-[var(--color-accent-coral-text)] bg-[var(--color-surface-2)]"
+          : "border-[var(--color-border-strong)] hover:bg-[var(--color-surface-2)]"
+      }`}
+      style={{ containerType: "inline-size" }}
+    >
+      <span
+        className="block truncate text-[var(--color-text-primary)] font-semibold"
+        style={{ fontFamily: f.displayVar, fontSize: "clamp(0.95rem, 8cqw, 1.35rem)" }}
+      >
+        {f.name}
+      </span>
+      <span
+        className="block truncate text-[var(--color-text-muted)]"
+        style={{ fontFamily: f.bodyVar, fontSize: "clamp(0.7rem, 5cqw, 0.85rem)" }}
+      >
+        Aa Bb Cc — the quick brown fox
+      </span>
+      {f.scriptCaution && (
+        <span className="mt-0.5 block text-[0.65rem] text-[var(--color-text-muted)]">
+          Best for a short title, not long body text
+        </span>
+      )}
+    </button>
+  );
+
   return (
     <div
       className="space-y-4 overflow-y-auto rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] p-3"
       style={{ maxHeight: "min(28rem, 45dvh)", containerType: "inline-size" }}
     >
+      {suggested.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--color-accent-coral-text)]">
+            {suggestedForName ? `Suggested for ${suggestedForName}` : "Suggested"}
+          </p>
+          {suggested.map(row)}
+        </div>
+      )}
       {MOOD_ORDER.filter((mood) => groups.has(mood)).map((mood) => (
         <div key={mood} className="space-y-1.5">
           <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
             {MOOD_LABELS[mood]}
           </p>
-          {groups.get(mood)!.map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => onChange(f.id)}
-              className={`w-full rounded-[var(--radius-sm)] border-2 px-3 py-2 text-left transition-colors ${
-                value === f.id
-                  ? "border-[var(--color-accent-coral-text)] bg-[var(--color-surface-2)]"
-                  : "border-[var(--color-border-strong)] hover:bg-[var(--color-surface-2)]"
-              }`}
-              style={{ containerType: "inline-size" }}
-            >
-              <span
-                className="block truncate text-[var(--color-text-primary)] font-semibold"
-                style={{ fontFamily: f.displayVar, fontSize: "clamp(0.95rem, 8cqw, 1.35rem)" }}
-              >
-                {f.name}
-              </span>
-              <span
-                className="block truncate text-[var(--color-text-muted)]"
-                style={{ fontFamily: f.bodyVar, fontSize: "clamp(0.7rem, 5cqw, 0.85rem)" }}
-              >
-                Aa Bb Cc — the quick brown fox
-              </span>
-              {f.scriptCaution && (
-                <span className="mt-0.5 block text-[0.65rem] text-[var(--color-text-muted)]">
-                  Best for a short title, not long body text
-                </span>
-              )}
-            </button>
-          ))}
+          {groups.get(mood)!.map(row)}
         </div>
       ))}
     </div>

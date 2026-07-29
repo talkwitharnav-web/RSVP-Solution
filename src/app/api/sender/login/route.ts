@@ -9,6 +9,7 @@ import {
   SESSION_COOKIE_SECURE,
 } from "@/lib/session";
 import { rateLimit } from "@/lib/rate-limit";
+import { bodyTooLarge, boundedText, SMALL_BODY_LIMIT, MAX_USERNAME_LENGTH } from "@/lib/validation";
 import type { UserRecord } from "@/lib/types";
 
 // Fixed bcrypt hash of an arbitrary string, compared against on every login
@@ -22,16 +23,26 @@ export async function POST(req: Request) {
   const limited = rateLimit(req, "sender-login", 10, 5 * 60 * 1000);
   if (limited) return limited;
 
+  if (bodyTooLarge(req, SMALL_BODY_LIMIT)) {
+    return NextResponse.json({ error: "Request body too large" }, { status: 413 });
+  }
+
   await initDb();
   const body = await req.json().catch(() => ({}));
   const { username, password, rememberMe } =
     body as { username?: unknown; password?: unknown; rememberMe?: unknown };
 
-  const trimmedUsername = typeof username === "string" ? username.trim() : "";
+  const trimmedUsername = boundedText(username, MAX_USERNAME_LENGTH);
   const rawPassword = typeof password === "string" ? password : "";
 
+  // lower(username) = lower($1), NOT `username ILIKE $1`: ILIKE treats % and
+  // _ in the *user-supplied* value as wildcards, so a username of "%" would
+  // match every row and hand back an arbitrary account for the password
+  // check -- turning "guess a username and its password" into "guess any one
+  // account's password." Exact case-insensitive comparison keeps the
+  // intended case-insensitive login without the wildcard semantics.
   const result = await pool.query<UserRecord>(
-    `SELECT * FROM users WHERE username ILIKE $1`,
+    `SELECT * FROM users WHERE lower(username) = lower($1)`,
     [trimmedUsername],
   );
   const user = result.rows[0];

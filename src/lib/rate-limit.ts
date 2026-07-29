@@ -30,6 +30,7 @@ function clientIp(req: Request): string {
 export function rateLimit(req: Request, bucketName: string, max: number, windowMs: number): NextResponse | null {
   const key = `${bucketName}:${clientIp(req)}`;
   const now = Date.now();
+  sweepExpired(now);
   const existing = buckets.get(key);
 
   if (!existing || now >= existing.resetAt) {
@@ -47,4 +48,22 @@ export function rateLimit(req: Request, bucketName: string, max: number, windowM
 
   existing.count += 1;
   return null;
+}
+
+/**
+ * Expired windows were previously reset in place but never removed, so the
+ * map grew by one permanent entry per (bucket, IP) pair forever -- a slow
+ * unbounded memory leak that a script hitting a public route from many
+ * source addresses could drive deliberately. Sweeping is throttled so the
+ * common path stays a single map lookup rather than a full scan per request.
+ */
+const SWEEP_INTERVAL_MS = 60 * 1000;
+let lastSweptAt = 0;
+
+function sweepExpired(now: number) {
+  if (now - lastSweptAt < SWEEP_INTERVAL_MS) return;
+  lastSweptAt = now;
+  for (const [key, bucket] of buckets) {
+    if (now >= bucket.resetAt) buckets.delete(key);
+  }
 }

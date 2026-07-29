@@ -1,19 +1,142 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Database, Trash2, Key, ShieldAlert, Search, Pencil } from "lucide-react";
+import {
+  Database,
+  Trash2,
+  Key,
+  ShieldAlert,
+  Search,
+  Pencil,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  FilterX,
+  Loader2,
+} from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Modal, ModalActions } from "@/components/ui/Modal";
-import { ToastProvider, useToast } from "@/components/ui/Toast";
+import { useToast } from "@/components/ui/Toast";
 import { CopyableValue } from "@/components/ui/CopyableValue";
+import { ThemedTooltip } from "@/components/ui/ThemedTooltip";
 import { StrengthMeter } from "@/components/ui/StrengthMeter";
 import { scorePasswordStrength } from "@/lib/credential-strength";
 import { useWebSocket } from "@/lib/useWebSocket";
-import type { UserRecord, EventRecord } from "@/lib/types";
+import { useOptimisticActions, reinsertAt } from "@/lib/optimistic";
+import type { UserRecord, EventRecord, EventKind } from "@/lib/types";
+
+// Single source of truth for RSVP kind display labels -- shared by the badge
+// and the filter dropdown so they can never drift apart (previously the
+// badge itself had a two-way ternary that silently mislabeled both
+// custom_card and designed_template as "Hosted Template").
+const EVENT_KIND_LABELS: Record<EventKind, string> = {
+  external_link: "External Link",
+  hosted_template: "Hosted Template",
+  custom_card: "Custom Card",
+  designed_template: "Designed Template",
+};
+
+type SortDirection = "asc" | "desc";
+interface SortState<K extends string> {
+  key: K | null;
+  direction: SortDirection;
+}
+const NO_SORT = { key: null, direction: "asc" as SortDirection };
+
+// asc -> desc -> unsorted, back to insertion order on the third click.
+function cycleSort<K extends string>(state: SortState<K>, key: K): SortState<K> {
+  if (state.key !== key) return { key, direction: "asc" };
+  if (state.direction === "asc") return { key, direction: "desc" };
+  return { key: null, direction: "asc" };
+}
+
+function compareText(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { sensitivity: "base" });
+}
+
+function compareChronological(a: string, b: string): number {
+  return new Date(a).getTime() - new Date(b).getTime();
+}
+
+function SortIcon({ direction }: { direction: SortDirection | null }) {
+  if (direction === "asc") return <ArrowUp size={14} />;
+  if (direction === "desc") return <ArrowDown size={14} />;
+  return <ArrowUpDown size={14} className="opacity-50" />;
+}
+
+// A <th> whose entire cell is a real <button>, so sorting is reachable by
+// keyboard, not just click -- and aria-sort reflects the live state for
+// screen readers.
+function SortableTh({
+  label,
+  active,
+  direction,
+  onClick,
+  className = "",
+}: {
+  label: string;
+  active: boolean;
+  direction: SortDirection;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <th
+      scope="col"
+      aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}
+      className={`text-left text-[var(--color-text-muted)] font-medium ${className}`}
+    >
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex items-center gap-1.5 w-full py-3 px-4 hover:text-[var(--color-text-primary)] transition-colors"
+      >
+        {label}
+        <SortIcon direction={active ? direction : null} />
+      </button>
+    </th>
+  );
+}
+
+// Caps a long value at maxWidthClass and truncates with an ellipsis instead
+// of letting it stretch the table (see the overflow bug this fixes), while
+// still surfacing the full value on hover via the app's own tooltip instead
+// of the native `title` attribute.
+function TruncatedText({ value, maxWidthClass = "max-w-[220px]" }: { value: string; maxWidthClass?: string }) {
+  return (
+    <ThemedTooltip label={value} className={`${maxWidthClass} min-w-0`}>
+      <span className="truncate">{value}</span>
+    </ThemedTooltip>
+  );
+}
+
+// Same truncation guarantee as TruncatedText, but keeps the click-to-copy
+// affordance CopyableValue already provides for the real (untruncated) value.
+function TruncatedCopyable({
+  value,
+  label,
+  maxWidthClass = "max-w-[220px]",
+  monospace = false,
+}: {
+  value: string;
+  label: string;
+  maxWidthClass?: string;
+  monospace?: boolean;
+}) {
+  return (
+    <ThemedTooltip label={value} className={`${maxWidthClass} min-w-0`}>
+      <CopyableValue
+        value={value}
+        label={label}
+        className={`max-w-full min-w-0 ${monospace ? "font-mono text-xs" : ""}`}
+      />
+    </ThemedTooltip>
+  );
+}
 
 interface ConfirmState {
   isOpen: boolean;
@@ -56,6 +179,16 @@ function AdminDbContent() {
   const [renameTarget, setRenameTarget] = useState<{ id: string; name: string; username: string } | null>(null);
   const [newName, setNewName] = useState("");
   const [newUsername, setNewUsername] = useState("");
+  const [userSort, setUserSort] = useState<SortState<"name" | "username">>(NO_SORT);
+  const [kindFilter, setKindFilter] = useState<EventKind | "all">("all");
+  const [eventSort, setEventSort] = useState<SortState<"title" | "kind" | "created_at">>(NO_SORT);
+
+  // Client-side prediction: row changes land in the table immediately and
+  // are rolled back only if the server refuses them. See lib/optimistic.ts.
+  const { run, pendingCount, hasPending, pendingRef } = useOptimisticActions();
+  // Set when a db-changed push arrives mid-flight and had to be ignored, so
+  // the deferred refetch still happens once everything is confirmed.
+  const missedRefreshRef = useRef(false);
 
   const reload = useCallback(async () => {
     const data = await fetchJson<{ users: UserRecord[]; events: EventRecord[] }>("/api/dev/db");
@@ -94,14 +227,56 @@ function AdminDbContent() {
   const dbChangedMessage = messagesByType["db-changed"];
   useEffect(() => {
     if (!isAdminAuthenticated || !dbChangedMessage) return;
+    // A refetch while one of our own mutations is still unconfirmed would
+    // overwrite the predicted state with server data that predates it --
+    // the deleted row would flash back into the table and then vanish
+    // again. Defer it to the effect below instead.
+    if (pendingRef.current > 0) {
+      missedRefreshRef.current = true;
+      return;
+    }
     // Reacting to an external system's own update (a WS push from another
     // client's mutation), not synchronizing from React's own state -- same
     // documented exception as HealthPin/AccessibilityMenu elsewhere in this
     // project (see SYSTEM_MEMORY.md).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbChangedMessage, isAdminAuthenticated]);
+
+  // Everything we predicted is now confirmed (or rolled back) -- safe to
+  // take the server's word for the whole table again.
+  useEffect(() => {
+    if (pendingCount > 0 || !missedRefreshRef.current) return;
+    missedRefreshRef.current = false;
+    // Reconciling with the server after our own in-flight writes settled.
+    void reload();
+  }, [pendingCount, reload]);
+
+  const filteredUsers = useMemo(() => {
+    const term = userSearch.trim().toLowerCase();
+    const matches = users.filter(
+      (u) => u.name.toLowerCase().includes(term) || u.username.toLowerCase().includes(term),
+    );
+    if (!userSort.key) return matches;
+    const key = userSort.key;
+    const sorted = [...matches].sort((a, b) => compareText(a[key], b[key]));
+    return userSort.direction === "asc" ? sorted : sorted.reverse();
+  }, [users, userSearch, userSort]);
+
+  const filteredEvents = useMemo(() => {
+    const term = eventSearch.trim().toLowerCase();
+    const matches = events.filter(
+      (e) => e.title.toLowerCase().includes(term) && (kindFilter === "all" || e.kind === kindFilter),
+    );
+    if (!eventSort.key) return matches;
+    const key = eventSort.key;
+    const sorted = [...matches].sort((a, b) => {
+      if (key === "created_at") return compareChronological(a.created_at, b.created_at);
+      if (key === "kind") return compareText(EVENT_KIND_LABELS[a.kind], EVENT_KIND_LABELS[b.kind]);
+      return compareText(a.title, b.title);
+    });
+    return eventSort.direction === "asc" ? sorted : sorted.reverse();
+  }, [events, eventSearch, kindFilter, eventSort]);
 
   if (isSessionLoading || !isAdminAuthenticated) return null;
 
@@ -159,12 +334,25 @@ function AdminDbContent() {
     });
   };
 
+  // The row disappears the instant you click, and comes back in its original
+  // position if the server refuses -- no spinner, no waiting on a round trip.
   const handleDeleteUser = (id: string, name: string, skipConfirm: boolean) => {
-    const doDelete = () =>
-      performAction(
-        () => fetchJson(`/api/users/${id}`, { method: "DELETE" }),
-        "User deleted successfully!",
-      );
+    const doDelete = () => {
+      closeConfirm();
+      const index = users.findIndex((u) => u.id === id);
+      const removed = users[index];
+      if (!removed) return;
+      void run({
+        apply: () => {
+          setUsers((prev) => prev.filter((u) => u.id !== id));
+          return () =>
+            setUsers((prev) => (prev.some((u) => u.id === id) ? prev : reinsertAt(prev, removed, index)));
+        },
+        commit: () => fetchJson(`/api/users/${id}`, { method: "DELETE" }),
+        errorLabel: `Couldn't delete ${name}`,
+        onConfirmed: () => showToast("User deleted successfully!", "success"),
+      });
+    };
     if (skipConfirm) {
       doDelete();
       return;
@@ -179,11 +367,22 @@ function AdminDbContent() {
   };
 
   const handleDeleteEvent = (slug: string, title: string, skipConfirm: boolean) => {
-    const doDelete = () =>
-      performAction(
-        () => fetchJson(`/api/events/${slug}`, { method: "DELETE" }),
-        "RSVP link deleted successfully!",
-      );
+    const doDelete = () => {
+      closeConfirm();
+      const index = events.findIndex((e) => e.slug === slug);
+      const removed = events[index];
+      if (!removed) return;
+      void run({
+        apply: () => {
+          setEvents((prev) => prev.filter((e) => e.slug !== slug));
+          return () =>
+            setEvents((prev) => (prev.some((e) => e.slug === slug) ? prev : reinsertAt(prev, removed, index)));
+        },
+        commit: () => fetchJson(`/api/events/${slug}`, { method: "DELETE" }),
+        errorLabel: `Couldn't delete "${title}"`,
+        onConfirmed: () => showToast("RSVP link deleted successfully!", "success"),
+      });
+    };
     if (skipConfirm) {
       doDelete();
       return;
@@ -197,47 +396,81 @@ function AdminDbContent() {
     });
   };
 
-  const handlePasswordReset = async () => {
-    if (!passwordResetTarget) return;
-    try {
-      await fetchJson(`/api/users/${passwordResetTarget}/password`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ newPassword }),
-      });
-      showToast("Password updated successfully!", "success");
-      setNewPassword("");
-      setPasswordResetTarget(null);
-      void reload();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "An unknown error occurred", "error");
-    }
+  const handlePasswordReset = () => {
+    const target = passwordResetTarget;
+    const password = newPassword;
+    if (!target) return;
+    const previousRaw = users.find((u) => u.id === target)?.raw_password ?? null;
+    void run({
+      apply: () => {
+        // The dev-mirror column is exactly what we just sent, so it can be
+        // predicted; the bcrypt hash can't be, and reconciles on confirm.
+        setUsers((prev) => prev.map((u) => (u.id === target ? { ...u, raw_password: password } : u)));
+        setNewPassword("");
+        setPasswordResetTarget(null);
+        return () => {
+          setUsers((prev) => prev.map((u) => (u.id === target ? { ...u, raw_password: previousRaw } : u)));
+          setNewPassword(password);
+          setPasswordResetTarget(target);
+        };
+      },
+      commit: () =>
+        fetchJson(`/api/users/${target}/password`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ newPassword: password }),
+        }),
+      errorLabel: "Couldn't update password",
+      onConfirmed: () => {
+        showToast("Password updated successfully!", "success");
+        // Pull the real hash once every in-flight change has settled.
+        missedRefreshRef.current = true;
+      },
+    });
   };
 
-  const handleRename = async () => {
-    if (!renameTarget) return;
-    try {
-      await fetchJson(`/api/users/${renameTarget.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newName, username: newUsername }),
-      });
-      showToast("User renamed successfully!", "success");
-      setRenameTarget(null);
-      void reload();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "An unknown error occurred", "error");
-    }
+  const handleRename = () => {
+    const target = renameTarget;
+    const name = newName;
+    const username = newUsername;
+    if (!target) return;
+    void run({
+      apply: () => {
+        setUsers((prev) => prev.map((u) => (u.id === target.id ? { ...u, name, username } : u)));
+        setRenameTarget(null);
+        return () => {
+          setUsers((prev) =>
+            prev.map((u) => (u.id === target.id ? { ...u, name: target.name, username: target.username } : u)),
+          );
+          setNewName(name);
+          setNewUsername(username);
+          setRenameTarget(target);
+        };
+      },
+      commit: () =>
+        fetchJson(`/api/users/${target.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, username }),
+        }),
+      errorLabel: `Couldn't rename ${target.name}`,
+      onConfirmed: () => showToast("User renamed successfully!", "success"),
+    });
   };
 
-  const filteredUsers = users.filter(
-    (u) =>
-      u.name.toLowerCase().includes(userSearch.trim().toLowerCase()) ||
-      u.username.toLowerCase().includes(userSearch.trim().toLowerCase()),
-  );
-  const filteredEvents = events.filter((e) =>
-    e.title.toLowerCase().includes(eventSearch.trim().toLowerCase()),
-  );
+  const userFiltersActive = userSearch !== "" || userSort.key !== null;
+  const eventFiltersActive = eventSearch !== "" || kindFilter !== "all" || eventSort.key !== null;
+
+  const clearUserFilters = () => {
+    setUserSearch("");
+    setUserSort(NO_SORT);
+  };
+
+  const clearEventFilters = () => {
+    setEventSearch("");
+    setKindFilter("all");
+    setEventSort(NO_SORT);
+  };
 
   if (isLoading) {
     return (
@@ -354,6 +587,17 @@ function AdminDbContent() {
             noClearTopRight
             actions={
               <>
+                {/* The tables already show the result of an action; this is
+                    the only hint that it hasn't been confirmed yet. */}
+                {hasPending && (
+                  <span
+                    role="status"
+                    className="inline-flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]"
+                  >
+                    <Loader2 size={14} className="animate-spin" />
+                    Syncing...
+                  </span>
+                )}
                 <Button variant="secondary" onClick={handleSeed}>
                   <Database size={16} />
                   Seed Database
@@ -374,30 +618,46 @@ function AdminDbContent() {
 
         <div className="flex-1 min-h-0 overflow-y-auto relative z-0">
           <section className="mb-10">
-            <div className="flex items-center justify-between mb-3 gap-4">
+            <div className="flex flex-wrap items-center justify-between mb-3 gap-3">
               <h2 className="font-display text-lg font-semibold text-[var(--color-text-primary)]">Users</h2>
-              <div className="relative w-full max-w-xs">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] pointer-events-none" />
-                <Input
-                  type="text"
-                  value={userSearch}
-                  onChange={(e) => setUserSearch(e.target.value)}
-                  placeholder="Search users..."
-                  aria-label="Search users"
-                  className="pl-9"
-                />
+              {/* No flex-wrap here: a `w-full` search box demanded the whole
+                  row, which bumped Clear filters onto a second line where it
+                  floated in dead space between the search box and the table.
+                  A definite width keeps the controls together as one row. */}
+              <div className="flex items-center gap-2">
+                <div className="relative w-72">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] pointer-events-none" />
+                  <Input
+                    type="text"
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    placeholder="Search users..."
+                    aria-label="Search users"
+                    className="pl-9"
+                  />
+                </div>
+                <Button variant="ghost" onClick={clearUserFilters} disabled={!userFiltersActive}>
+                  <FilterX size={16} />
+                  Clear filters
+                </Button>
               </div>
             </div>
             <Card className="!p-0 overflow-x-auto max-h-[40vh] overflow-y-auto">
               <table className="min-w-full text-sm">
                 <thead className="sticky top-0 bg-[var(--color-surface-1)] z-20 shadow-[0_1px_0_var(--color-border)]">
                   <tr className="border-b border-[var(--color-border)]">
-                    <th scope="col" className="py-3 px-4 text-left text-[var(--color-text-muted)] font-medium">
-                      Name
-                    </th>
-                    <th scope="col" className="py-3 px-4 text-left text-[var(--color-text-muted)] font-medium">
-                      Username
-                    </th>
+                    <SortableTh
+                      label="Name"
+                      active={userSort.key === "name"}
+                      direction={userSort.direction}
+                      onClick={() => setUserSort((s) => cycleSort(s, "name"))}
+                    />
+                    <SortableTh
+                      label="Username"
+                      active={userSort.key === "username"}
+                      direction={userSort.direction}
+                      onClick={() => setUserSort((s) => cycleSort(s, "username"))}
+                    />
                     <th
                       scope="col"
                       className="py-3 px-4 text-left text-[var(--color-text-muted)] font-medium hidden lg:table-cell"
@@ -419,23 +679,34 @@ function AdminDbContent() {
                   {filteredUsers.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="py-6 px-4 text-center text-[var(--color-text-muted)]">
-                        No users match your search.
+                        {users.length === 0 ? "No users yet." : "No users match your search."}
                       </td>
                     </tr>
                   ) : (
                     filteredUsers.map((u) => (
                       <tr key={u.id} className="border-b border-[var(--color-border)] last:border-0">
                         <td className="py-3 px-4 text-[var(--color-text-primary)] font-medium">
-                          <CopyableValue value={u.name} label="name" />
+                          <TruncatedCopyable value={u.name} label="name" maxWidthClass="max-w-[140px] sm:max-w-[220px]" />
                         </td>
                         <td className="py-3 px-4 text-[var(--color-text-muted)]">
-                          <CopyableValue value={u.username} label="username" />
+                          <TruncatedCopyable
+                            value={u.username}
+                            label="username"
+                            maxWidthClass="max-w-[140px] sm:max-w-[200px]"
+                          />
                         </td>
-                        <td className="py-3 px-4 text-[var(--color-text-muted)] font-mono text-xs break-all hidden lg:table-cell">
-                          <CopyableValue value={u.password} label="hashed password" />
+                        <td className="py-3 px-4 text-[var(--color-text-muted)] hidden lg:table-cell">
+                          <TruncatedCopyable value={u.password} label="hashed password" monospace maxWidthClass="max-w-[200px]" />
                         </td>
-                        <td className="py-3 px-4 text-[var(--color-text-muted)] font-mono text-xs hidden md:table-cell">
-                          {u.raw_password && <CopyableValue value={u.raw_password} label="raw password" />}
+                        <td className="py-3 px-4 text-[var(--color-text-muted)] hidden md:table-cell">
+                          {u.raw_password && (
+                            <TruncatedCopyable
+                              value={u.raw_password}
+                              label="raw password"
+                              monospace
+                              maxWidthClass="max-w-[160px]"
+                            />
+                          )}
                         </td>
                         <td className="sticky right-0 py-3 px-4 text-right bg-[var(--color-surface-1)] z-10">
                           <div className="flex justify-end gap-2">
@@ -476,18 +747,37 @@ function AdminDbContent() {
           </section>
 
           <section>
-            <div className="flex items-center justify-between mb-3 gap-4">
+            <div className="flex flex-wrap items-center justify-between mb-3 gap-3">
               <h2 className="font-display text-lg font-semibold text-[var(--color-text-primary)]">RSVP Links</h2>
-              <div className="relative w-full max-w-xs">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] pointer-events-none" />
-                <Input
-                  type="text"
-                  value={eventSearch}
-                  onChange={(e) => setEventSearch(e.target.value)}
-                  placeholder="Search RSVP links..."
-                  aria-label="Search RSVP links"
-                  className="pl-9"
-                />
+              <div className="flex items-center gap-2">
+                <div className="relative w-72">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] pointer-events-none" />
+                  <Input
+                    type="text"
+                    value={eventSearch}
+                    onChange={(e) => setEventSearch(e.target.value)}
+                    placeholder="Search RSVP links..."
+                    aria-label="Search RSVP links"
+                    className="pl-9"
+                  />
+                </div>
+                <select
+                  value={kindFilter}
+                  onChange={(e) => setKindFilter(e.target.value as EventKind | "all")}
+                  aria-label="Filter by kind"
+                  className="px-3 py-2.5 text-sm bg-[var(--color-surface-0)] text-[var(--color-text-primary)] border border-[var(--color-border-strong)] rounded-[var(--radius-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-coral-text)] focus:border-[var(--color-accent-coral-text)] transition-colors"
+                >
+                  <option value="all">All kinds</option>
+                  {(Object.entries(EVENT_KIND_LABELS) as [EventKind, string][]).map(([kind, label]) => (
+                    <option key={kind} value={kind}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                <Button variant="ghost" onClick={clearEventFilters} disabled={!eventFiltersActive}>
+                  <FilterX size={16} />
+                  Clear filters
+                </Button>
               </div>
             </div>
             <Card className="!p-0 overflow-hidden max-h-[55vh] flex flex-col relative">
@@ -495,21 +785,28 @@ function AdminDbContent() {
                 <table className="min-w-full text-sm">
                   <thead className="sticky top-0 bg-[var(--color-surface-1)] z-20 shadow-[0_1px_0_var(--color-border)]">
                     <tr className="border-b border-[var(--color-border)]">
-                      <th scope="col" className="py-3 px-4 text-left text-[var(--color-text-muted)] font-medium">
-                        Title
-                      </th>
-                      <th scope="col" className="py-3 px-4 text-left text-[var(--color-text-muted)] font-medium">
-                        Kind
-                      </th>
+                      <SortableTh
+                        label="Title"
+                        active={eventSort.key === "title"}
+                        direction={eventSort.direction}
+                        onClick={() => setEventSort((s) => cycleSort(s, "title"))}
+                      />
+                      <SortableTh
+                        label="Kind"
+                        active={eventSort.key === "kind"}
+                        direction={eventSort.direction}
+                        onClick={() => setEventSort((s) => cycleSort(s, "kind"))}
+                      />
                       <th scope="col" className="py-3 px-4 text-left text-[var(--color-text-muted)] font-medium">
                         Link
                       </th>
-                      <th
-                        scope="col"
-                        className="py-3 px-4 text-left text-[var(--color-text-muted)] font-medium hidden md:table-cell"
-                      >
-                        Created At
-                      </th>
+                      <SortableTh
+                        label="Created At"
+                        active={eventSort.key === "created_at"}
+                        direction={eventSort.direction}
+                        onClick={() => setEventSort((s) => cycleSort(s, "created_at"))}
+                        className="hidden md:table-cell"
+                      />
                       <th className="sticky right-0 py-3 px-4 text-right text-[var(--color-text-muted)] font-medium bg-[var(--color-surface-1)] z-10">
                         Actions
                       </th>
@@ -519,21 +816,28 @@ function AdminDbContent() {
                     {filteredEvents.length === 0 ? (
                       <tr>
                         <td colSpan={5} className="py-6 px-4 text-center text-[var(--color-text-muted)]">
-                          No RSVP links match your search.
+                          {events.length === 0 ? "No RSVP links yet." : "No RSVP links match your filters."}
                         </td>
                       </tr>
                     ) : (
                       filteredEvents.map((e) => (
                         <tr key={e.id} className="border-b border-[var(--color-border)] last:border-0">
-                          <td className="py-3 px-4 text-[var(--color-text-primary)] font-medium">{e.title}</td>
+                          <td className="py-3 px-4 text-[var(--color-text-primary)] font-medium">
+                            <TruncatedText value={e.title} maxWidthClass="max-w-[180px] sm:max-w-[280px]" />
+                          </td>
                           <td className="py-3 px-4">
                             <span className="text-xs font-medium px-2 py-1 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] text-[var(--color-text-muted)]">
-                              {e.kind === "external_link" ? "External Link" : "Hosted Template"}
+                              {EVENT_KIND_LABELS[e.kind]}
                             </span>
                           </td>
-                          <td className="py-3 px-4 text-[var(--color-text-muted)] font-mono text-xs">
+                          <td className="py-3 px-4 text-[var(--color-text-muted)]">
                             {typeof window !== "undefined" && (
-                              <CopyableValue value={`${window.location.origin}/receiver/${e.slug}`} label="RSVP link" />
+                              <TruncatedCopyable
+                                value={`${window.location.origin}/receiver/${e.slug}`}
+                                label="RSVP link"
+                                monospace
+                                maxWidthClass="max-w-[220px]"
+                              />
                             )}
                           </td>
                           <td className="py-3 px-4 text-[var(--color-text-primary)] hidden md:table-cell">
@@ -564,9 +868,5 @@ function AdminDbContent() {
 }
 
 export default function AdminDbPage() {
-  return (
-    <ToastProvider>
-      <AdminDbContent />
-    </ToastProvider>
-  );
+  return <AdminDbContent />;
 }

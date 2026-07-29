@@ -60,7 +60,9 @@ export default function GuestEventView({ initialEvent }: { initialEvent: EventRe
         <div
           className="mx-auto flex w-full overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)] shadow-lg"
           style={{
-            maxWidth: "28rem",
+            // Fills the page's own fluid column rather than being pinned to a
+            // fixed 28rem, which left a card designed at 1000px rendering
+            // noticeably small on a desktop viewport.
             aspectRatio: `${event.design_config.canvasWidth} / ${event.design_config.canvasHeight}`,
           }}
         >
@@ -72,6 +74,7 @@ export default function GuestEventView({ initialEvent }: { initialEvent: EventRe
             canvasHeight={event.design_config.canvasHeight}
             initialJSON={event.design_config.canvasJSON}
             backgroundColor={event.design_config.colors?.background ?? DEFAULT_DESIGN_COLORS.background}
+            fontPairId={event.design_config.fontPairId}
             readOnly
             className="h-full w-full"
           />

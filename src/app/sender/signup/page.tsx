@@ -7,6 +7,7 @@ import { Input, Label } from "@/components/ui/Input";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { Button } from "@/components/ui/Button";
 import { StrengthMeter } from "@/components/ui/StrengthMeter";
+import { useToast } from "@/components/ui/Toast";
 import { scorePasswordStrength } from "@/lib/credential-strength";
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -18,6 +19,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 export default function SenderSignupPage() {
   const router = useRouter();
+  const showToast = useToast();
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -58,7 +60,9 @@ export default function SenderSignupPage() {
       });
       router.push("/sender");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An unknown error occurred");
+      const message = err instanceof Error ? err.message : "An unknown error occurred";
+      setError(message);
+      showToast(`Couldn't create your account \u2014 ${message}`, "error");
       setIsLoading(false);
     }
   };

@@ -56,6 +56,7 @@ All pairs below are verified against WCAG 2.1 contrast math (not eyeballed) — 
 | `--color-on-lavender` | `#FFFFFF` | Text/icons on a solid lavender fill | 6.10:1 vs lavender fill |
 | `--color-border` | `#F0D9E1` | Hairlines, input borders | — (non-text, decorative) |
 | `--color-danger` | `#B3261E` | Errors, validation | 5.97:1 (deliberately a clearly separate crimson, not the same family as coral — shifted further 2026-07-24 so it doesn't read as "a shade of the brand color") |
+| `--color-on-danger` | `#FFFFFF` | Text/icons on a solid danger fill (error notifications) — added 2026-07-28 | 6.57:1 vs `#B3261E` fill |
 
 #### Dark mode
 
@@ -73,6 +74,7 @@ All pairs below are verified against WCAG 2.1 contrast math (not eyeballed) — 
 | `--color-on-lavender` | `#241C3D` | Text/icons on a solid lavender fill — same "dark fill needs dark text" reasoning as on-sage | 7.44:1 vs lavender fill |
 | `--color-border` | `#4A3350` | Hairlines, input borders | — |
 | `--color-danger` | `#FF6B5E` | Errors, validation | 6.09:1 |
+| `--color-on-danger` | `#3D0F12` | Text/icons on a solid danger fill — dark mode's lightened danger red only reaches **2.81:1** against white, so it takes a near-black instead, same reasoning as on-sage/on-lavender | 5.89:1 vs danger fill |
 
 **Why dark mode only needs one coral token, not two:** the accessibility research point about desaturating/lightening for dark backgrounds means the dark-mode coral is already light enough to double as both decorative and text color — light mode's coral had to split into two tokens (a punchier decorative shade and a darker text-safe shade) specifically because the vivid version fails AA at text sizes on a light background.
 

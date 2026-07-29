@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronUp, ChevronDown, Trash2, Type, Image as ImageIcon, Sparkles, Shapes } from "lucide-react";
+import { ThemedTooltip } from "@/components/ui/ThemedTooltip";
 import type { CanvasLayerKind, CanvasLayerSummary } from "./FabricCanvas";
 
 const KIND_ICON: Record<CanvasLayerKind, typeof Type> = {
@@ -61,34 +62,44 @@ export function LayersPanel({
               className="flex flex-1 items-center gap-2 text-left text-sm text-[var(--color-text-primary)] min-w-0"
             >
               <Icon className="h-4 w-4 flex-shrink-0 text-[var(--color-text-muted)]" strokeWidth={2} />
-              <span className="truncate">{layer.label}</span>
+              {/* Long filenames are truncated in the row but shown in full on
+                  hover, so a layer stays identifiable either way. */}
+              <ThemedTooltip label={layer.label} className="min-w-0">
+                <span className="truncate">{layer.label}</span>
+              </ThemedTooltip>
             </button>
-            <button
-              type="button"
-              onClick={() => onMoveUp(layer.layerId, index)}
-              disabled={index === 0}
-              title="Bring forward"
-              className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-0)] disabled:opacity-30"
-            >
-              <ChevronUp className="h-3.5 w-3.5" strokeWidth={2} />
-            </button>
-            <button
-              type="button"
-              onClick={() => onMoveDown(layer.layerId, index)}
-              disabled={index === layers.length - 1}
-              title="Send backward"
-              className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-0)] disabled:opacity-30"
-            >
-              <ChevronDown className="h-3.5 w-3.5" strokeWidth={2} />
-            </button>
-            <button
-              type="button"
-              onClick={() => onDelete(layer.layerId)}
-              title="Delete"
-              className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-danger)] hover:bg-[var(--color-surface-0)]"
-            >
-              <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
-            </button>
+            <ThemedTooltip label="Bring forward">
+              <button
+                type="button"
+                onClick={() => onMoveUp(layer.layerId, index)}
+                disabled={index === 0}
+                aria-label={`Bring ${layer.label} forward`}
+                className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-0)] disabled:opacity-30"
+              >
+                <ChevronUp className="h-3.5 w-3.5" strokeWidth={2} />
+              </button>
+            </ThemedTooltip>
+            <ThemedTooltip label="Send backward">
+              <button
+                type="button"
+                onClick={() => onMoveDown(layer.layerId, index)}
+                disabled={index === layers.length - 1}
+                aria-label={`Send ${layer.label} backward`}
+                className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-0)] disabled:opacity-30"
+              >
+                <ChevronDown className="h-3.5 w-3.5" strokeWidth={2} />
+              </button>
+            </ThemedTooltip>
+            <ThemedTooltip label="Delete" align="right">
+              <button
+                type="button"
+                onClick={() => onDelete(layer.layerId)}
+                aria-label={`Delete ${layer.label}`}
+                className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-danger)] hover:bg-[var(--color-surface-0)]"
+              >
+                <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+              </button>
+            </ThemedTooltip>
           </li>
         );
       })}

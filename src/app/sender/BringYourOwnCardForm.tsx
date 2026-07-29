@@ -5,21 +5,12 @@ import { useRouter } from "next/navigation";
 import { ImagePlus } from "lucide-react";
 import { Input, Label } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
-import { isAcceptedImageType, isHeicFile, convertHeicToJpeg } from "@/lib/image-upload";
-
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB — plenty for a card image, keeps the data-URL small enough for a DB column and a single JSON POST body
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
+import { useToast } from "@/components/ui/Toast";
+import { isAcceptedImageType, isHeicFile, convertHeicToJpeg, prepareCardImage } from "@/lib/image-upload";
 
 export function BringYourOwnCardForm({ onCancel, onClose }: { onCancel: () => void; onClose: () => void }) {
   const router = useRouter();
+  const showToast = useToast();
   const [title, setTitle] = useState("");
   const [hostName, setHostName] = useState("");
   const [description, setDescription] = useState("");
@@ -30,6 +21,7 @@ export function BringYourOwnCardForm({ onCancel, onClose }: { onCancel: () => vo
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [convertingHeic, setConvertingHeic] = useState(false);
+  const [compressing, setCompressing] = useState(false);
 
   const handleImageChange = async (e: ChangeEvent<HTMLInputElement>) => {
     let file = e.target.files?.[0];
@@ -55,14 +47,20 @@ export function BringYourOwnCardForm({ onCancel, onClose }: { onCancel: () => vo
       setError("Please choose a PNG, JPEG, WebP, GIF, or AVIF image (SVG isn't supported).");
       return;
     }
-    if (file.size > MAX_IMAGE_BYTES) {
-      setError("Image is too large — please choose one under 5MB.");
-      return;
-    }
     setError(null);
-    const dataUrl = await fileToDataUrl(file);
-    setImageDataUrl(dataUrl);
-    setImagePreview(dataUrl);
+    // Oversized images are compressed down to the 5MB per-image budget
+    // rather than rejected -- a normal phone photo is well past that, and
+    // making the host go find a resizer first is the wrong answer.
+    setCompressing(true);
+    try {
+      const dataUrl = await prepareCardImage(file);
+      setImageDataUrl(dataUrl);
+      setImagePreview(dataUrl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't process that image.");
+    } finally {
+      setCompressing(false);
+    }
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -90,9 +88,11 @@ export function BringYourOwnCardForm({ onCancel, onClose }: { onCancel: () => vo
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Something went wrong");
       onClose();
-      router.push(`/e/${data.slug}?mode=edit`);
+      router.push(`/e/${data.slug}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      setError(message);
+      showToast(`Couldn't create your invitation \u2014 ${message}`, "error");
       setSubmitting(false);
     }
   };
@@ -107,6 +107,8 @@ export function BringYourOwnCardForm({ onCancel, onClose }: { onCancel: () => vo
         >
           {convertingHeic ? (
             <span className="text-sm text-[var(--color-text-muted)]">Converting HEIC photo...</span>
+          ) : compressing ? (
+            <span className="text-sm text-[var(--color-text-muted)]">Compressing image...</span>
           ) : imagePreview ? (
             // eslint-disable-next-line @next/next/no-img-element -- local FileReader data URL preview, not a static asset
             <img src={imagePreview} alt="Invitation preview" className="max-h-48 rounded-[var(--radius-sm)] object-contain" />
@@ -160,7 +162,7 @@ export function BringYourOwnCardForm({ onCancel, onClose }: { onCancel: () => vo
         <Button type="button" variant="secondary" onClick={onCancel}>
           Back
         </Button>
-        <Button type="submit" disabled={submitting || convertingHeic}>
+        <Button type="submit" disabled={submitting || convertingHeic || compressing}>
           {submitting ? "Creating..." : "Create Invitation"}
         </Button>
       </div>

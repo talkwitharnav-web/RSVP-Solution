@@ -10,7 +10,8 @@
     "start:all": "\"%LOCALAPPDATA%\\Programs\\Git\\bin\\bash.exe\" scripts/startup.sh",
     "stop:all": "\"%LOCALAPPDATA%\\Programs\\Git\\bin\\bash.exe\" scripts/shutdown.sh",
     "db:up": "docker compose up -d",
-    "db:down": "\"%LOCALAPPDATA%\\Programs\\Git\\bin\\bash.exe\" scripts/shutdown.sh"
+    "db:down": "\"%LOCALAPPDATA%\\Programs\\Git\\bin\\bash.exe\" scripts/shutdown.sh",
+    "allow-lan": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/allow-lan.ps1"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

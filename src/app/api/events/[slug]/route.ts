@@ -1,12 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { initDb, pool } from "@/lib/db";
 import { requireAdmin, requireSender } from "@/lib/auth";
+import { verifySessionToken, SENDER_SESSION_COOKIE_NAME } from "@/lib/session";
 import { broadcastDbChanged } from "@/lib/ws-broadcast";
 import { isAcceptedImageDataUrl, isAcceptedImageDataUrlSize } from "@/lib/image-upload";
 import { parseGuestCategories } from "@/lib/guest-categories";
 import { sanitizeDesignConfig } from "@/lib/design-types";
 import { DESIGN_FONT_PAIRS } from "@/lib/design-fonts";
+import {
+  bodyTooLarge,
+  boundedText,
+  optionalBoundedText,
+  MEDIA_BODY_LIMIT,
+  MAX_TITLE_LENGTH,
+  MAX_SHORT_TEXT_LENGTH,
+  MAX_LONG_TEXT_LENGTH,
+  MAX_URL_LENGTH,
+} from "@/lib/validation";
 
+/**
+ * Public read of one event. Mirrors the gate on the /receiver/[slug] page
+ * itself: an unpublished draft is only visible to the sender who owns it.
+ * Without this the publish gate was page-level only -- anyone holding a slug
+ * could read the full draft straight from the API, which is exactly what
+ * publishing is supposed to prevent.
+ */
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ slug: string }> },
@@ -19,7 +38,23 @@ export async function GET(
     return NextResponse.json({ error: "Event not found" }, { status: 404 });
   }
 
-  return NextResponse.json(result.rows[0]);
+  const event = result.rows[0];
+  if (!event.published) {
+    const cookieStore = await cookies();
+    const session = verifySessionToken(cookieStore.get(SENDER_SESSION_COOKIE_NAME)?.value);
+    const isOwner = session?.type === "sender" && session.userId === event.created_by;
+    // Same 404 (not 403) an unknown slug gets, so this can't be used to
+    // confirm that a given slug exists but hasn't been published yet.
+    if (!isOwner) {
+      return NextResponse.json({ error: "Event not found" }, { status: 404 });
+    }
+  }
+
+  // created_by is the owning sender's user id -- internal, and of no use to
+  // a guest rendering the invitation.
+  const publicEvent = { ...event };
+  delete publicEvent.created_by;
+  return NextResponse.json(publicEvent);
 }
 
 /**
@@ -36,6 +71,10 @@ export async function PUT(
   const auth = await requireSender();
   if (!auth.ok) return auth.response;
 
+  if (bodyTooLarge(req, MEDIA_BODY_LIMIT)) {
+    return NextResponse.json({ error: "Request body too large" }, { status: 413 });
+  }
+
   await initDb();
   const { slug } = await params;
   const body = await req.json();
@@ -49,9 +88,44 @@ export async function PUT(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const title = String(body.title ?? "").trim();
+  const title = boundedText(body.title, MAX_TITLE_LENGTH);
   if (!title) {
     return NextResponse.json({ error: "Title is required" }, { status: 400 });
+  }
+
+  // Every field below follows the same rule: a key absent from the body means
+  // "the caller wasn't editing this," so the existing value is kept. This
+  // used to overwrite host_name/description/event_date/location
+  // unconditionally, which meant the Publish button (which sends only
+  // { title, published: true }) silently wiped all four of them from the row.
+  const hostName =
+    body.hostName !== undefined ? optionalBoundedText(body.hostName, MAX_SHORT_TEXT_LENGTH) : event.host_name;
+  const description =
+    body.description !== undefined ? optionalBoundedText(body.description, MAX_LONG_TEXT_LENGTH) : event.description;
+  const location =
+    body.location !== undefined ? optionalBoundedText(body.location, MAX_SHORT_TEXT_LENGTH) : event.location;
+  const eventDate = body.eventDate !== undefined ? body.eventDate || null : event.event_date;
+
+  // external_link events could previously never change their target URL --
+  // it was set once at creation and had no edit path at all. Same http(s)
+  // validation as creation, since this value is rendered as a real <a href>
+  // on the public guest page.
+  let externalUrl = event.external_url;
+  if (event.kind === "external_link" && body.externalUrl !== undefined) {
+    const candidate = boundedText(body.externalUrl, MAX_URL_LENGTH);
+    if (!candidate) {
+      return NextResponse.json({ error: "External URL is required" }, { status: 400 });
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(candidate);
+    } catch {
+      return NextResponse.json({ error: "External URL must be a valid http(s) link" }, { status: 400 });
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return NextResponse.json({ error: "External URL must be a valid http(s) link" }, { status: 400 });
+    }
+    externalUrl = candidate;
   }
 
   let cardImageUrl = event.card_image_url;
@@ -105,19 +179,20 @@ export async function PUT(
 
   const result = await pool.query(
     `UPDATE events
-     SET title = $1, host_name = $2, description = $3, event_date = $4, location = $5, card_image_url = $6, guest_categories = $7, published = $8, design_config = $9
-     WHERE slug = $10
+     SET title = $1, host_name = $2, description = $3, event_date = $4, location = $5, card_image_url = $6, guest_categories = $7, published = $8, design_config = $9, external_url = $10
+     WHERE slug = $11
      RETURNING *`,
     [
       title,
-      body.hostName || null,
-      body.description || null,
-      body.eventDate || null,
-      body.location || null,
+      hostName,
+      description,
+      eventDate,
+      location,
       cardImageUrl,
       JSON.stringify(guestCategories),
       published,
       designConfig ? JSON.stringify(designConfig) : null,
+      externalUrl,
       slug,
     ],
   );

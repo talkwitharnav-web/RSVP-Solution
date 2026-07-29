@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import {
   createSessionToken,
   ADMIN_SESSION_COOKIE_NAME,
@@ -7,12 +8,35 @@ import {
   SESSION_COOKIE_SECURE,
 } from "@/lib/session";
 import { rateLimit } from "@/lib/rate-limit";
+import { bodyTooLarge, SMALL_BODY_LIMIT } from "@/lib/validation";
 
-// Hardcoded admin credentials, matching the reference project's own
-// pre-public-launch approach — see CLAUDE.md for a note to move these to
-// real env vars before any non-local deployment.
-const ADMIN_USERNAME = "darkglory";
-const ADMIN_PASSWORD = "R$vp@dm!n";
+// Hardcoded fallback admin credentials, matching the reference project's own
+// pre-public-launch approach — see CLAUDE.md. ADMIN_USERNAME/ADMIN_PASSWORD
+// env vars override them, so a real deployment can supply real credentials
+// without a code change (the hardcoded pair is in source control and is
+// therefore public to anyone who has seen this repo).
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "darkglory";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "R$vp@dm!n";
+
+/**
+ * Length-independent, constant-time string comparison. A plain `!==` leaks
+ * how many leading characters matched via response timing, which is the
+ * exact weakness the sender login route already guards against with its
+ * dummy-hash bcrypt compare. Both values are hashed to a fixed-size buffer
+ * first so differing lengths don't short-circuit either.
+ */
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf8");
+  const bufB = Buffer.from(b, "utf8");
+  // Pad to equal length so timingSafeEqual never throws on a length mismatch;
+  // the length difference itself is still folded into the result.
+  const len = Math.max(bufA.length, bufB.length);
+  const paddedA = Buffer.alloc(len);
+  const paddedB = Buffer.alloc(len);
+  bufA.copy(paddedA);
+  bufB.copy(paddedB);
+  return timingSafeEqual(paddedA, paddedB) && bufA.length === bufB.length;
+}
 
 export async function POST(req: Request) {
   // Only one valid credential pair exists -- an unlimited endpoint is a
@@ -20,11 +44,19 @@ export async function POST(req: Request) {
   const limited = rateLimit(req, "admin-login", 10, 5 * 60 * 1000);
   if (limited) return limited;
 
+  if (bodyTooLarge(req, SMALL_BODY_LIMIT)) {
+    return NextResponse.json({ error: "Request body too large" }, { status: 413 });
+  }
+
   const body = await req.json().catch(() => ({}));
   const { username, password, rememberMe } =
     body as { username?: unknown; password?: unknown; rememberMe?: unknown };
 
-  if (username !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
+  // Both comparisons always run (no `&&` short-circuit) so a correct
+  // username can't be distinguished from an incorrect one by timing.
+  const usernameOk = safeEqual(typeof username === "string" ? username : "", ADMIN_USERNAME);
+  const passwordOk = safeEqual(typeof password === "string" ? password : "", ADMIN_PASSWORD);
+  if (!usernameOk || !passwordOk) {
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
 

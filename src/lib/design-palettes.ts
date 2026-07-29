@@ -16,6 +16,14 @@ import type { DesignColors } from "@/lib/design-types";
 export type DesignPalette = {
   id: string;
   name: string;
+  /**
+   * Font pairs that suit this palette's mood, surfaced as a "Suggested for
+   * <palette>" shortlist above the full 30-pair picker. Advisory only --
+   * every pair stays selectable, this just gives a starting point instead of
+   * making the sender scan the whole list to find something that fits.
+   * Ids must exist in DESIGN_FONT_PAIRS.
+   */
+  suggestedFontPairIds: string[];
 } & DesignColors;
 
 export const DESIGN_PALETTES: DesignPalette[] = [
@@ -27,6 +35,7 @@ export const DESIGN_PALETTES: DesignPalette[] = [
     textMuted: "#4C6B48",
     accent: "#3E6B33",
     onAccent: "#FFFFFF",
+    suggestedFontPairIds: ["garamond-montserrat", "philosopher-karla", "parisienne-karla"],
   },
   {
     id: "sunset",
@@ -36,6 +45,7 @@ export const DESIGN_PALETTES: DesignPalette[] = [
     textMuted: "#7A4A2E",
     accent: "#E8501F",
     onAccent: "#FFFFFF",
+    suggestedFontPairIds: ["pacifico-quicksand", "amaticsc-worksans", "outfit-figtree"],
   },
   {
     id: "evening",
@@ -45,6 +55,7 @@ export const DESIGN_PALETTES: DesignPalette[] = [
     textMuted: "#5A4C74",
     accent: "#5B4590",
     onAccent: "#FFFFFF",
+    suggestedFontPairIds: ["cinzel-eb", "cormorant-jost", "greatvibes-mulish"],
   },
   {
     id: "classic",
@@ -54,6 +65,7 @@ export const DESIGN_PALETTES: DesignPalette[] = [
     textMuted: "#6B6259",
     accent: "#C42E3D",
     onAccent: "#FFFFFF",
+    suggestedFontPairIds: ["signature", "editorial", "marcellus-poppins"],
   },
   {
     id: "ocean",
@@ -63,6 +75,7 @@ export const DESIGN_PALETTES: DesignPalette[] = [
     textMuted: "#3E6A70",
     accent: "#0B7A8C",
     onAccent: "#FFFFFF",
+    suggestedFontPairIds: ["spacegrotesk-ibm", "sora-manrope", "libre-source"],
   },
   {
     id: "berry",
@@ -72,6 +85,7 @@ export const DESIGN_PALETTES: DesignPalette[] = [
     textMuted: "#7A3D5C",
     accent: "#B0246E",
     onAccent: "#FFFFFF",
+    suggestedFontPairIds: ["dancing-lato", "allura-jakarta", "prata-mulish"],
   },
   {
     id: "midnight",
@@ -81,6 +95,7 @@ export const DESIGN_PALETTES: DesignPalette[] = [
     textMuted: "#B6ADD6",
     accent: "#8B7CF6",
     onAccent: "#1B1830",
+    suggestedFontPairIds: ["unbounded-dmsans", "bungee-worksans", "abril-lora"],
   },
   {
     id: "citrus",
@@ -90,9 +105,6 @@ export const DESIGN_PALETTES: DesignPalette[] = [
     textMuted: "#6E5A1E",
     accent: "#C98A00",
     onAccent: "#FFFFFF",
+    suggestedFontPairIds: ["fredoka-comfortaa", "baloo-nunito", "luckiestguy-poppins"],
   },
 ];
-
-export function getDesignPalette(id: string): DesignPalette | undefined {
-  return DESIGN_PALETTES.find((p) => p.id === id);
-}

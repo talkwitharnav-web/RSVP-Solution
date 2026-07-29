@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Check, X } from "lucide-react";
 import { Input, Label } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { useOptimisticActions } from "@/lib/optimistic";
 import type { RsvpQuestion } from "@/lib/types";
 
 /**
@@ -70,17 +71,35 @@ function CategoryCounts({
   onChange: (category: string, value: number) => void;
 }) {
   const total = categories.reduce((sum, c) => sum + (counts[c] ?? 0), 0);
+  // Each count field needs its own label association -- the category name
+  // used to be a plain span, so a screen reader announced two identical
+  // unlabelled spin buttons with no way to tell Adults from Kids.
+  const fieldIdPrefix = useId();
+  const groupLabelId = `${fieldIdPrefix}-group`;
 
   return (
-    <div>
-      <Label>Who&apos;s coming?</Label>
+    <div role="group" aria-labelledby={groupLabelId}>
+      {/* A span, not <Label>: it names the whole group via aria-labelledby,
+          and a <label> with no control of its own is an orphan. */}
+      <span
+        id={groupLabelId}
+        className="block text-sm font-medium text-[var(--color-text-muted)] mb-2"
+      >
+        Who&apos;s coming?
+      </span>
       <div className="flex flex-wrap items-end gap-2">
         {categories.map((category, i) => (
           <div key={category} className="flex items-end gap-2">
             {i > 0 && <span className="pb-3 text-lg font-semibold text-[var(--color-text-muted)]">+</span>}
             <div className="flex flex-col gap-1">
-              <span className="text-xs text-[var(--color-text-muted)]">{category}</span>
+              <label
+                htmlFor={`${fieldIdPrefix}-${i}`}
+                className="text-xs text-[var(--color-text-muted)]"
+              >
+                {category}
+              </label>
               <Input
+                id={`${fieldIdPrefix}-${i}`}
                 type="number"
                 min={0}
                 max={MAX_CATEGORY_COUNT}
@@ -142,27 +161,35 @@ export default function RsvpForm({
   });
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
+  // The thank-you appears the moment the guest submits, rather than after a
+  // round trip; if the server refuses (event unpublished, rate limited, bad
+  // input) the form comes straight back with their answers intact and the
+  // real reason shown. See lib/optimistic.ts.
+  const { run, hasPending } = useOptimisticActions();
+
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    setSubmitting(true);
-    try {
-      const res = await fetch(`/api/events/${slug}/rsvps`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ guestName, attending, categoryCounts, answers }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Something went wrong");
-      setSubmitted(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setSubmitting(false);
-    }
+    void run({
+      apply: () => {
+        setError(null);
+        setSubmitted(true);
+        return () => setSubmitted(false);
+      },
+      commit: async () => {
+        const res = await fetch(`/api/events/${slug}/rsvps`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ guestName, attending, categoryCounts, answers }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Something went wrong");
+        return data;
+      },
+      errorLabel: "Your RSVP wasn't recorded",
+      onRejected: (err) => setError(`Your RSVP wasn't recorded — ${err.message}`),
+    });
   }
 
   if (submitted) {
@@ -171,6 +198,11 @@ export default function RsvpForm({
         <p className="text-lg text-[var(--color-text-primary)]">
           Thanks, <span className="font-semibold">{guestName}</span>! Your RSVP has been recorded.
         </p>
+        {hasPending && (
+          <p className="mt-2 text-sm text-[var(--color-text-muted)]" role="status">
+            Sending it to the host...
+          </p>
+        )}
       </Card>
     );
   }
@@ -179,7 +211,13 @@ export default function RsvpForm({
     <form onSubmit={handleSubmit} className="flex flex-col gap-5 sm:gap-6">
       <div>
         <Label htmlFor="guestName">Your name</Label>
-        <Input id="guestName" value={guestName} onChange={(e) => setGuestName(e.target.value)} required />
+        <Input
+          id="guestName"
+          value={guestName}
+          onChange={(e) => setGuestName(e.target.value)}
+          maxLength={120}
+          required
+        />
       </div>
 
       <AttendanceToggle attending={attending} onChange={setAttending} />
@@ -214,6 +252,7 @@ export default function RsvpForm({
               id={q.id}
               value={answers[q.id] ?? ""}
               onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+              maxLength={2000}
               required={q.required}
             />
           )}
@@ -221,8 +260,8 @@ export default function RsvpForm({
       ))}
 
       {error && <p className="text-sm text-[var(--color-danger)]">{error}</p>}
-      <Button type="submit" size="lg" disabled={submitting} className="w-full">
-        {submitting ? "Submitting…" : "Submit RSVP"}
+      <Button type="submit" size="lg" className="w-full">
+        Submit RSVP
       </Button>
     </form>
   );

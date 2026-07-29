@@ -7,20 +7,10 @@ import { Input, Label } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { CopyableValue } from "@/components/ui/CopyableValue";
-import { isAcceptedImageType, isHeicFile, convertHeicToJpeg } from "@/lib/image-upload";
+import { isAcceptedImageType, isHeicFile, convertHeicToJpeg, prepareCardImage } from "@/lib/image-upload";
 import { formatGuestCategories } from "@/lib/guest-categories";
+import { useOptimisticActions } from "@/lib/optimistic";
 import type { EventRecord } from "@/lib/types";
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
-
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 function toDatetimeLocalValue(iso: string | null): string {
   if (!iso) return "";
@@ -44,15 +34,20 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
   const [description, setDescription] = useState(initialEvent.description ?? "");
   const [eventDate, setEventDate] = useState(toDatetimeLocalValue(initialEvent.event_date));
   const [location, setLocation] = useState(initialEvent.location ?? "");
+  const [externalUrl, setExternalUrl] = useState(initialEvent.external_url ?? "");
   const [guestCategoriesText, setGuestCategoriesText] = useState(formatGuestCategories(initialEvent.guest_categories));
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(initialEvent.card_image_url);
   const [convertingHeic, setConvertingHeic] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [publishing, setPublishing] = useState(false);
+  const [compressing, setCompressing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [receiverOrigin, setReceiverOrigin] = useState("");
+
+  // Saving and publishing are predicted locally and rolled back if the
+  // server refuses, rather than making the sender watch a round trip --
+  // see lib/optimistic.ts.
+  const { run, hasPending } = useOptimisticActions();
 
   // window.location isn't available during SSR -- the copyable receiver
   // link needs the real origin, not a guess, so it's read on mount rather
@@ -84,64 +79,100 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
       setError("Please choose a PNG, JPEG, WebP, GIF, or AVIF image (SVG isn't supported).");
       return;
     }
-    if (file.size > MAX_IMAGE_BYTES) {
-      setError("Image is too large — please choose one under 5MB.");
-      return;
-    }
     setError(null);
-    const dataUrl = await fileToDataUrl(file);
-    setImageDataUrl(dataUrl);
-    setImagePreview(dataUrl);
+    // Compressed to fit the 5MB per-image budget rather than rejected --
+    // same pipeline BringYourOwnCardForm uses for the original upload.
+    setCompressing(true);
+    try {
+      const dataUrl = await prepareCardImage(file);
+      setImageDataUrl(dataUrl);
+      setImagePreview(dataUrl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't process that image.");
+    } finally {
+      setCompressing(false);
+    }
   };
 
-  const handleSave = async (e: FormEvent) => {
+  const handleSave = (e: FormEvent) => {
     e.preventDefault();
-    setSaving(true);
-    setError(null);
-    setSavedAt(null);
-    try {
-      const res = await fetch(`/api/events/${event.slug}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+    const previousEvent = event;
+    const previousSavedAt = savedAt;
+    const previousImageDataUrl = imageDataUrl;
+    const payload = {
+      title,
+      hostName: hostName || null,
+      description: description || null,
+      eventDate: eventDate ? new Date(eventDate).toISOString() : null,
+      location: location || null,
+      guestCategories: guestCategoriesText,
+      ...(event.kind === "external_link" ? { externalUrl } : {}),
+      ...(imageDataUrl ? { cardImageUrl: imageDataUrl } : {}),
+    };
+
+    void run<EventRecord>({
+      apply: () => {
+        // Everything here is already on screen in the form -- the only thing
+        // changing is the record it's saved against, so predicting it can't
+        // show the sender anything they didn't just type.
+        setError(null);
+        setSavedAt(Date.now());
+        setEvent((prev) => ({
+          ...prev,
           title,
-          hostName: hostName || null,
+          host_name: hostName || null,
           description: description || null,
-          eventDate: eventDate ? new Date(eventDate).toISOString() : null,
+          event_date: payload.eventDate,
           location: location || null,
-          guestCategories: guestCategoriesText,
-          ...(imageDataUrl ? { cardImageUrl: imageDataUrl } : {}),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Something went wrong");
-      setEvent(data);
-      setImageDataUrl(null);
-      setSavedAt(Date.now());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setSaving(false);
-    }
+          ...(imageDataUrl ? { card_image_url: imageDataUrl } : {}),
+        }));
+        setImageDataUrl(null);
+        return () => {
+          setEvent(previousEvent);
+          setSavedAt(previousSavedAt);
+          setImageDataUrl(previousImageDataUrl);
+        };
+      },
+      commit: async () => {
+        const res = await fetch(`/api/events/${event.slug}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Something went wrong");
+        return data as EventRecord;
+      },
+      // Reconcile with the authoritative row (server-side truncation, the
+      // real stored image URL, etc).
+      onConfirmed: (saved) => setEvent(saved),
+      errorLabel: "Couldn't save your changes",
+      onRejected: (err) => setError(`Couldn't save — ${err.message}`),
+    });
   };
 
-  const handlePublish = async () => {
-    setPublishing(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/events/${event.slug}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, published: true }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Something went wrong");
-      setEvent(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setPublishing(false);
-    }
+  const handlePublish = () => {
+    const previousEvent = event;
+    void run<EventRecord>({
+      apply: () => {
+        setError(null);
+        setEvent((prev) => ({ ...prev, published: true }));
+        return () => setEvent(previousEvent);
+      },
+      commit: async () => {
+        const res = await fetch(`/api/events/${event.slug}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, published: true }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Something went wrong");
+        return data as EventRecord;
+      },
+      onConfirmed: (saved) => setEvent(saved),
+      errorLabel: "Couldn't publish this invitation",
+      onRejected: (err) => setError(`Couldn't publish — ${err.message}`),
+    });
   };
 
   const receiverUrl = `${receiverOrigin}/receiver/${event.slug}`;
@@ -159,6 +190,7 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
         <Link
           href={`/receiver/${event.slug}`}
           target="_blank"
+          rel="noopener noreferrer"
           className="inline-flex items-center gap-1.5 text-sm text-[var(--color-accent-coral-text)] hover:underline"
         >
           <Eye className="h-4 w-4" strokeWidth={2} />
@@ -196,9 +228,9 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
               <p className="text-sm font-medium text-[var(--color-text-primary)] mb-3">
                 This invitation is still a draft -- guests can&apos;t see it yet.
               </p>
-              <Button type="button" onClick={handlePublish} disabled={publishing}>
+              <Button type="button" onClick={handlePublish}>
                 <Rocket className="h-4 w-4" strokeWidth={2.5} />
-                {publishing ? "Publishing..." : "Publish"}
+                Publish
               </Button>
             </>
           )}
@@ -214,6 +246,8 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
               >
                 {convertingHeic ? (
                   <span className="text-sm text-[var(--color-text-muted)]">Converting HEIC photo...</span>
+                ) : compressing ? (
+                  <span className="text-sm text-[var(--color-text-muted)]">Compressing image...</span>
                 ) : imagePreview ? (
                   // eslint-disable-next-line @next/next/no-img-element -- data URL / uploaded image, not an optimizable static asset
                   <img src={imagePreview} alt="Invitation preview" className="max-h-48 rounded-[var(--radius-sm)] object-contain" />
@@ -236,20 +270,37 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
 
           <div>
             <Label htmlFor="title">Event title</Label>
-            <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} required />
+            <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} required />
           </div>
 
           <div>
             <Label htmlFor="hostName">Host name</Label>
-            <Input id="hostName" value={hostName} onChange={(e) => setHostName(e.target.value)} />
+            <Input id="hostName" value={hostName} onChange={(e) => setHostName(e.target.value)} maxLength={300} />
           </div>
+          {event.kind === "external_link" && (
+            <div>
+              <Label htmlFor="externalUrl">RSVP link</Label>
+              <Input
+                id="externalUrl"
+                type="url"
+                value={externalUrl}
+                onChange={(e) => setExternalUrl(e.target.value)}
+                maxLength={2048}
+                placeholder="https://forms.gle/..."
+                required
+              />
+              <p className="mt-1.5 text-xs text-[var(--color-text-muted)]">
+                Where the &ldquo;RSVP now&rdquo; button sends your guests. Must start with http:// or https://.
+              </p>
+            </div>
+          )}
           <div>
             <Label htmlFor="eventDate">Date &amp; time</Label>
             <Input id="eventDate" type="datetime-local" value={eventDate} onChange={(e) => setEventDate(e.target.value)} />
           </div>
           <div>
             <Label htmlFor="location">Location</Label>
-            <Input id="location" value={location} onChange={(e) => setLocation(e.target.value)} />
+            <Input id="location" value={location} onChange={(e) => setLocation(e.target.value)} maxLength={300} />
           </div>
           <div>
             <Label htmlFor="description">Additional details</Label>
@@ -258,6 +309,7 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
+              maxLength={5000}
               className="w-full px-4 py-3 text-base bg-[var(--color-surface-0)] text-[var(--color-text-primary)] border border-[var(--color-border-strong)] rounded-[var(--radius-sm)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-coral-text)] focus:border-[var(--color-accent-coral-text)] transition-colors"
             />
           </div>
@@ -279,10 +331,14 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
           )}
 
           {error && <p className="text-sm text-[var(--color-danger)]">{error}</p>}
-          {savedAt && !error && <p className="text-sm text-[var(--color-success)]">Saved.</p>}
+          {savedAt && !error && (
+            <p className="text-sm text-[var(--color-success)]">
+              Saved.{hasPending && <span className="text-[var(--color-text-muted)]"> Syncing...</span>}
+            </p>
+          )}
 
-          <Button type="submit" disabled={saving || convertingHeic} className="w-full">
-            {saving ? "Saving..." : "Save Changes"}
+          <Button type="submit" disabled={convertingHeic || compressing} className="w-full">
+            Save Changes
           </Button>
         </form>
       </Card>

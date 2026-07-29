@@ -126,13 +126,23 @@ export const ModalActions: FC<{
   onCancel: () => void;
   onConfirm: () => void;
   confirmLabel?: string;
+  /** Overrides "Cancel" where the dismissive choice is a real option rather than backing out. */
+  cancelLabel?: string;
   danger?: boolean;
   confirmDisabled?: boolean;
   submit?: boolean;
-}> = ({ onCancel, onConfirm, confirmLabel = "Confirm", danger = false, confirmDisabled = false, submit = false }) => (
+}> = ({
+  onCancel,
+  onConfirm,
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
+  danger = false,
+  confirmDisabled = false,
+  submit = false,
+}) => (
   <div className="flex justify-end gap-3 mt-6">
     <Button type="button" variant="secondary" onClick={onCancel}>
-      Cancel
+      {cancelLabel}
     </Button>
     <Button
       type={submit ? "submit" : "button"}

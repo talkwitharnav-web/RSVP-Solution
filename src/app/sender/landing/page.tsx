@@ -35,7 +35,13 @@ export default function SenderLandingPage() {
             RSVP Sender
           </span>
         </div>
-        <div className="flex items-center gap-3">
+        {/* mr-11 clears the globally-mounted settings pill, a fixed top-right
+            overlay that was measurably covering the right 13px of Sign Up and
+            making part of the primary call to action unclickable. A static
+            margin rather than a width-tracking reserve: the pill should draw
+            over things when it expands, not make the header shuffle around
+            as it opens and closes. */}
+        <div className="mr-11 flex items-center gap-3">
           <Link href="/sender/login">
             <Button variant="secondary">Log In</Button>
           </Link>

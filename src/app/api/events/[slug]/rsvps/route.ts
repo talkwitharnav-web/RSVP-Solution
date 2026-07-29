@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { initDb, pool } from "@/lib/db";
 import { broadcastDbChanged } from "@/lib/ws-broadcast";
 import { rateLimit } from "@/lib/rate-limit";
+import {
+  bodyTooLarge,
+  boundedText,
+  SMALL_BODY_LIMIT,
+  MAX_PERSON_NAME_LENGTH,
+  MAX_ANSWER_LENGTH,
+} from "@/lib/validation";
+import type { RsvpQuestion } from "@/lib/types";
 
 export async function POST(
   req: NextRequest,
@@ -14,18 +22,24 @@ export async function POST(
   const limited = rateLimit(req, "rsvp-submit", 20, 10 * 60 * 1000);
   if (limited) return limited;
 
+  if (bodyTooLarge(req, SMALL_BODY_LIMIT)) {
+    return NextResponse.json({ error: "Request body too large" }, { status: 413 });
+  }
+
   await initDb();
   const { slug } = await params;
-  const body = await req.json();
+  const body = await req.json().catch(() => ({}));
 
-  const guestName = String(body.guestName ?? "").trim();
+  const guestName = boundedText(body.guestName, MAX_PERSON_NAME_LENGTH);
   if (!guestName) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
   }
   const attending = Boolean(body.attending);
-  const answers = typeof body.answers === "object" && body.answers !== null ? body.answers : {};
 
-  const eventResult = await pool.query(`SELECT id, guest_categories, published FROM events WHERE slug = $1`, [slug]);
+  const eventResult = await pool.query(
+    `SELECT id, guest_categories, questions, published FROM events WHERE slug = $1`,
+    [slug],
+  );
   if (eventResult.rows.length === 0) {
     return NextResponse.json({ error: "Event not found" }, { status: 404 });
   }
@@ -38,6 +52,30 @@ export async function POST(
   }
   const eventId = eventResult.rows[0].id;
   const guestCategories: string[] = eventResult.rows[0].guest_categories;
+  const questions: RsvpQuestion[] = eventResult.rows[0].questions ?? [];
+
+  // answers used to be stored verbatim as whatever JSON the body contained,
+  // with no key filtering and no size bound -- so a direct API call could
+  // write arbitrary (and arbitrarily large) JSON into the column. Same
+  // treatment as categoryCounts below: only keys the event actually defines
+  // survive, and each value is coerced to a bounded string or boolean.
+  const rawAnswers =
+    typeof body.answers === "object" && body.answers !== null
+      ? (body.answers as Record<string, unknown>)
+      : {};
+  const answers: Record<string, string | boolean> = {};
+  for (const question of questions) {
+    const value = rawAnswers[question.id];
+    if (value === undefined) continue;
+    if (question.type === "boolean") {
+      // RsvpForm's yes/no <select> submits the strings "yes"/"no", so a plain
+      // Boolean() would turn "no" into true. Anything that isn't an
+      // affirmative reads as false.
+      answers[question.id] = value === true || value === "yes" || value === "true";
+    } else {
+      answers[question.id] = boundedText(value, MAX_ANSWER_LENGTH);
+    }
+  }
 
   // category_counts is keyed by the event's own guest_categories (e.g.
   // {"Adults": 2, "Kids": 1}) -- only categories the event actually defines

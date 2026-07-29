@@ -7,8 +7,10 @@ import { AuthCard } from "@/components/ui/AuthCard";
 import { Input, Label } from "@/components/ui/Input";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
 
 export default function AdminGatewayPage() {
+  const showToast = useToast();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
@@ -38,13 +40,19 @@ export default function AdminGatewayPage() {
         body: JSON.stringify({ username, password, rememberMe }),
       });
       if (!response.ok) {
-        setError("Invalid credentials. Please try again.");
+        const message =
+          response.status === 429
+            ? "Too many attempts. Wait a few minutes and try again."
+            : "Invalid credentials. Please try again.";
+        setError(message);
+        showToast(`Admin login failed \u2014 ${message}`, "error");
         setIsLoading(false);
         return;
       }
       setHasAdminSession(true);
     } catch {
       setError("Invalid credentials. Please try again.");
+      showToast("Admin login failed \u2014 couldn't reach the server.", "error");
       setIsLoading(false);
     }
   };

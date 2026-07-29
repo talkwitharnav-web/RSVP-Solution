@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { ArrowRight, FileImage, ChartPie, Link2, Check } from "lucide-react";
 import { useDropdownReveal } from "@/lib/useDropdownReveal";
+import { useToast } from "@/components/ui/Toast";
 import { StatsModal } from "./StatsModal";
 import type { EventRecord } from "@/lib/types";
 
@@ -15,13 +16,20 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 export function InvitationGallery() {
+  const showToast = useToast();
   const [events, setEvents] = useState<EventRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchJson<{ events: EventRecord[] }>("/api/sender/events")
       .then((data) => setEvents(data.events))
-      .catch((err) => setError(err instanceof Error ? err.message : "Something went wrong"));
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : "Something went wrong";
+        setError(message);
+        showToast(`Couldn't load your invitations \u2014 ${message}`, "error");
+      });
+    // Runs once on mount; showToast is stable for the provider's lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -118,11 +126,17 @@ function InvitationCard({ event }: { event: EventRecord }) {
       />
 
       <Link
-        href={`/e/${event.slug}?mode=edit`}
+        href={`/e/${event.slug}`}
         aria-label={`Continue editing ${event.title}`}
         className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 p-3 pt-10"
       >
-        <span className="truncate text-sm font-semibold text-white" title={event.title}>
+        {/* min-w-0 is what makes `truncate` produce an ellipsis here. A flex
+            item with overflow:hidden gets an automatic minimum size of zero,
+            so once the action buttons claim their space on a narrow card the
+            title collapsed to width 0 and the invitation showed no name at
+            all -- the same flexbox trap already fixed in the Access DB
+            tables. flex-1 lets it claim whatever room is left. */}
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-white" title={event.title}>
           {event.title}
         </span>
         <span className="flex flex-shrink-0 items-center gap-1.5">

@@ -10,6 +10,13 @@ import {
   SESSION_COOKIE_SECURE,
 } from "@/lib/session";
 import { rateLimit } from "@/lib/rate-limit";
+import {
+  bodyTooLarge,
+  boundedText,
+  SMALL_BODY_LIMIT,
+  MAX_USERNAME_LENGTH,
+  MAX_PERSON_NAME_LENGTH,
+} from "@/lib/validation";
 
 const SALT_ROUNDS = 10;
 const MIN_PASSWORD_LENGTH = 8;
@@ -20,13 +27,17 @@ export async function POST(req: Request) {
   const limited = rateLimit(req, "sender-register", 5, 60 * 60 * 1000);
   if (limited) return limited;
 
+  if (bodyTooLarge(req, SMALL_BODY_LIMIT)) {
+    return NextResponse.json({ error: "Request body too large" }, { status: 413 });
+  }
+
   await initDb();
   const body = await req.json().catch(() => ({}));
   const { name: rawName, username: rawUsername, password: rawPassword, rememberMe } =
     body as { name?: unknown; username?: unknown; password?: unknown; rememberMe?: unknown };
 
-  const name = typeof rawName === "string" ? rawName.trim() : "";
-  const username = typeof rawUsername === "string" ? rawUsername.trim() : "";
+  const name = boundedText(rawName, MAX_PERSON_NAME_LENGTH);
+  const username = boundedText(rawUsername, MAX_USERNAME_LENGTH);
   const password =
     typeof rawPassword === "string" &&
     rawPassword.length >= MIN_PASSWORD_LENGTH &&
@@ -45,7 +56,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `Password must be ${MIN_PASSWORD_LENGTH}-200 characters` }, { status: 400 });
   }
 
-  const existing = await pool.query(`SELECT id FROM users WHERE username ILIKE $1`, [username]);
+  // lower(username) = lower($1), NOT `username ILIKE $1` -- see the same
+  // note in the login route: % and _ in a user-supplied value are ILIKE
+  // wildcards, so registering the username "%" would match every existing
+  // row and report "already taken" for anything.
+  const existing = await pool.query(`SELECT id FROM users WHERE lower(username) = lower($1)`, [username]);
   if (existing.rows[0]) {
     return NextResponse.json({ error: "That username is already taken" }, { status: 409 });
   }

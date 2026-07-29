@@ -53,6 +53,7 @@ import {
   Philosopher,
 } from "next/font/google";
 import { GlobalSettingsToggles } from "@/components/ui/GlobalSettingsToggles";
+import { ToastProvider } from "@/components/ui/Toast";
 import "./globals.css";
 
 const bricolage = Bricolage_Grotesque({
@@ -253,8 +254,13 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="min-h-full flex flex-col">
-        <GlobalSettingsToggles />
-        {children}
+        {/* Mounted once here rather than per page -- a failure has to be
+            able to surface from anywhere, including the guest pages and the
+            design editor, which previously had no notification host at all. */}
+        <ToastProvider>
+          <GlobalSettingsToggles />
+          {children}
+        </ToastProvider>
       </body>
     </html>
   );

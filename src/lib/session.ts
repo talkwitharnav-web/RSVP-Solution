@@ -3,9 +3,17 @@ import { createHmac, timingSafeEqual } from "crypto";
 /**
  * Dev-only fallback secret, same pattern as the reference project's own
  * session.ts, so the app works locally without requiring SESSION_SECRET to
- * be set. Set a real SESSION_SECRET before any non-local deployment.
+ * be set. A production build refuses to start without a real one -- the
+ * fallback is committed to source control, so anyone who has seen this repo
+ * could otherwise forge admin/sender session cookies at will.
  */
 if (!process.env.SESSION_SECRET) {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "SESSION_SECRET must be set in production. The dev fallback secret is public " +
+      "(it is committed to this repository), so anyone could forge admin and sender sessions.",
+    );
+  }
   console.warn(
     "\n*** WARNING: SESSION_SECRET is not set. Falling back to a hardcoded, " +
     "publicly-known dev secret — anyone who has seen this source can forge " +
@@ -49,12 +57,28 @@ export function verifySessionToken(token: string | undefined | null): SessionPay
   }
 
   try {
-    const payload: SessionPayload = JSON.parse(Buffer.from(data, "base64url").toString("utf8"));
-    if (payload.exp < Date.now()) return null;
-    return payload;
+    const parsed: unknown = JSON.parse(Buffer.from(data, "base64url").toString("utf8"));
+    if (!isSessionPayload(parsed)) return null;
+    if (parsed.exp < Date.now()) return null;
+    return parsed;
   } catch {
     return null;
   }
+}
+
+/**
+ * The signature check above already proves this app minted the token, so
+ * this is about shape rather than trust -- a payload from an older token
+ * format (or one missing `exp` entirely) would otherwise pass through as a
+ * valid session, because `undefined < Date.now()` is false and so reads as
+ * "not expired."
+ */
+function isSessionPayload(value: unknown): value is SessionPayload {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.exp !== "number" || !Number.isFinite(v.exp)) return false;
+  if (v.type === "admin") return true;
+  return v.type === "sender" && typeof v.userId === "string" && typeof v.username === "string";
 }
 
 /**

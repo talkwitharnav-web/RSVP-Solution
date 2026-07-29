@@ -3,9 +3,12 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
-import { X } from "lucide-react";
+import { X, Trash2 } from "lucide-react";
 import { useDropdownReveal } from "@/lib/useDropdownReveal";
 import { useWebSocket } from "@/lib/useWebSocket";
+import { useOptimisticActions, reinsertAt } from "@/lib/optimistic";
+import { categoryLabelForCount } from "@/lib/guest-categories";
+import { ThemedTooltip } from "@/components/ui/ThemedTooltip";
 import type { EventRecord, RsvpRecord } from "@/lib/types";
 
 /**
@@ -28,6 +31,18 @@ const CATEGORY_COLORS_LIGHT = ["#c42e3d", "#69579c", "#b8860b"];
 const CATEGORY_COLORS_DARK = ["#d94538", "#9d84cf", "#b98a00"];
 const OVERFLOW_COLOR_LIGHT = "#e0becb"; // --color-border-strong
 const OVERFLOW_COLOR_DARK = "#5c4364"; // --color-border-strong (dark)
+
+/**
+ * "Can't come" is deliberately a desaturated neutral rather than a fourth
+ * hue: it isn't a guest category, it's the absence of one, and the palette
+ * above only has three slots that survive the all-pairs CVD/contrast gates.
+ * A muted grey also matches how "not attending" reads everywhere else in
+ * the app. It carries a direct label in the legend, same as every other
+ * slice, so it never depends on colour alone to be identified.
+ */
+const DECLINED_COLOR_LIGHT = "#6b6259"; // --color-text-muted
+const DECLINED_COLOR_DARK = "#b7ada2"; // --color-text-muted (dark)
+const DECLINED_LABEL = "Can't come";
 
 function useIsDarkTheme() {
   const [isDark, setIsDark] = useState(false);
@@ -52,25 +67,26 @@ function useIsDarkTheme() {
   return isDark;
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("Failed to load statistics");
-  return res.json();
+async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || "Failed to load statistics");
+  return json;
 }
 
 type StatsData = { guestCategories: string[]; rsvps: RsvpRecord[] };
 
-type PieTooltipPayload = { payload: { category: string; value: number; color: string } };
+type PieTooltipPayload = { payload: { label: string; value: number; color: string } };
 
 /** Themed replacement for recharts' default tooltip box, matching the app's surface/border tokens instead of the library's plain white default. */
 function PieSegmentTooltip({ active, payload }: { active?: boolean; payload?: PieTooltipPayload[] }) {
   if (!active || !payload || payload.length === 0) return null;
-  const { category, value, color } = payload[0].payload;
+  const { label, value, color } = payload[0].payload;
   return (
     <div className="flex items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-sm shadow-lg">
       <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} aria-hidden="true" />
       <span className="font-semibold text-[var(--color-text-primary)]">{value}</span>
-      <span className="text-[var(--color-text-muted)]">{category}</span>
+      <span className="text-[var(--color-text-muted)]">{label}</span>
     </div>
   );
 }
@@ -79,9 +95,14 @@ export function StatsModal({ event, isOpen, onClose }: { event: EventRecord; isO
   const { shouldRender } = useDropdownReveal(isOpen);
   const [data, setData] = useState<StatsData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Which row is asking "are you sure?" -- an inline confirm rather than a
+  // second Modal, since this view is already a modal and stacking two
+  // backdrops means one stray click can close both.
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const isDark = useIsDarkTheme();
   const { messagesByType } = useWebSocket();
   const dbChanged = messagesByType["db-changed"];
+  const { run } = useOptimisticActions();
 
   const load = () => {
     fetchJson<StatsData>(`/api/events/${event.slug}/rsvps/stats`)
@@ -108,18 +129,53 @@ export function StatsModal({ event, isOpen, onClose }: { event: EventRecord; isO
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbChanged, isOpen]);
 
+  // A guest can only submit, never edit, so removing a wrong answer is the
+  // sender's job. The row disappears immediately and comes back where it
+  // was if the server refuses -- see lib/optimistic.ts.
+  const deleteRsvp = (rsvp: RsvpRecord, index: number) => {
+    setConfirmingId(null);
+    void run({
+      apply: () => {
+        setData((prev) => (prev ? { ...prev, rsvps: prev.rsvps.filter((r) => r.id !== rsvp.id) } : prev));
+        return () =>
+          setData((prev) =>
+            !prev || prev.rsvps.some((r) => r.id === rsvp.id)
+              ? prev
+              : { ...prev, rsvps: reinsertAt(prev.rsvps, rsvp, index) },
+          );
+      },
+      commit: () => fetchJson(`/api/events/${event.slug}/rsvps/${rsvp.id}`, { method: "DELETE" }),
+      errorLabel: `Couldn't remove ${rsvp.guest_name}'s RSVP`,
+    });
+  };
+
   if (!shouldRender) return null;
 
   const categories = data?.guestCategories ?? [];
-  const attendingRsvps = (data?.rsvps ?? []).filter((r) => r.attending);
+  const allRsvps = data?.rsvps ?? [];
+  const attendingRsvps = allRsvps.filter((r) => r.attending);
+  const declinedCount = allRsvps.length - attendingRsvps.length;
   const colors = isDark ? CATEGORY_COLORS_DARK : CATEGORY_COLORS_LIGHT;
   const overflowColor = isDark ? OVERFLOW_COLOR_DARK : OVERFLOW_COLOR_LIGHT;
+  const declinedColor = isDark ? DECLINED_COLOR_DARK : DECLINED_COLOR_LIGHT;
 
-  const chartData = categories.map((category, i) => ({
-    category,
-    value: attendingRsvps.reduce((sum, r) => sum + (r.category_counts[category] ?? 0), 0),
-    color: i < colors.length ? colors[i] : overflowColor,
-  }));
+  // A decline contributes no guest counts, so it's counted as one person per
+  // response -- without its own slice, saying "no" would leave the sender
+  // with no evidence anywhere that the guest ever replied.
+  // `category` stays the raw key (stable React key + tooltip name); `label`
+  // is what's shown, singularised when the count is exactly one.
+  const chartData = [
+    ...categories.map((category, i) => {
+      const value = attendingRsvps.reduce((sum, r) => sum + (r.category_counts[category] ?? 0), 0);
+      return {
+        category,
+        label: categoryLabelForCount(category, value),
+        value,
+        color: i < colors.length ? colors[i] : overflowColor,
+      };
+    }),
+    { category: DECLINED_LABEL, label: DECLINED_LABEL, value: declinedCount, color: declinedColor },
+  ];
   const total = chartData.reduce((sum, d) => sum + d.value, 0);
 
   const backdropClass = isOpen ? "modal-backdrop-reveal" : "modal-backdrop-reveal-out";
@@ -159,7 +215,7 @@ export function StatsModal({ event, isOpen, onClose }: { event: EventRecord; isO
             <div className="flex flex-col items-center">
               {total === 0 ? (
                 <p className="py-16 text-sm text-[var(--color-text-muted)]">
-                  No attending RSVPs yet -- the chart will fill in as responses come in.
+                  No RSVPs yet -- the chart will fill in as responses come in.
                 </p>
               ) : (
                 <>
@@ -199,7 +255,7 @@ export function StatsModal({ event, isOpen, onClose }: { event: EventRecord; isO
                           aria-hidden="true"
                         />
                         <span className="text-[var(--color-text-primary)] font-medium">{d.value}</span>
-                        <span className="text-[var(--color-text-muted)]">{d.category}</span>
+                        <span className="text-[var(--color-text-muted)]">{d.label}</span>
                       </li>
                     ))}
                   </ul>
@@ -211,28 +267,78 @@ export function StatsModal({ event, isOpen, onClose }: { event: EventRecord; isO
               <h3 className="text-sm font-semibold text-[var(--color-text-muted)] uppercase tracking-wide mb-3">
                 Guest Breakdown
               </h3>
-              {attendingRsvps.length === 0 ? (
-                <p className="text-sm text-[var(--color-text-muted)]">No attending RSVPs yet.</p>
+              {allRsvps.length === 0 ? (
+                <p className="text-sm text-[var(--color-text-muted)]">No RSVPs yet.</p>
               ) : (
                 <ul className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                  {attendingRsvps.map((rsvp) => (
+                  {allRsvps.map((rsvp, index) => (
                     <li
                       key={rsvp.id}
                       className="flex flex-col gap-1.5 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] px-3 py-2.5"
                     >
-                      <span className="text-sm font-medium text-[var(--color-text-primary)] truncate">
-                        {rsvp.guest_name}
-                      </span>
-                      <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--color-text-muted)]">
-                        {categories.map((category) => (
-                          <span key={category} className="whitespace-nowrap">
-                            <span className="font-semibold text-[var(--color-text-primary)]">
-                              {rsvp.category_counts[category] ?? 0}
-                            </span>{" "}
-                            {category}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-[var(--color-text-primary)] truncate">
+                          {rsvp.guest_name}
+                        </span>
+                        {confirmingId === rsvp.id ? (
+                          <span className="flex shrink-0 items-center gap-2 text-xs">
+                            <span className="text-[var(--color-text-muted)]">Remove?</span>
+                            <button
+                              type="button"
+                              onClick={() => deleteRsvp(rsvp, index)}
+                              className="font-semibold text-[var(--color-danger)] hover:underline"
+                            >
+                              Yes
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmingId(null)}
+                              className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+                            >
+                              Cancel
+                            </button>
                           </span>
-                        ))}
-                      </span>
+                        ) : (
+                          <ThemedTooltip label="Remove this RSVP (shift-click to skip the confirm)">
+                            <button
+                              type="button"
+                              aria-label={`Remove ${rsvp.guest_name}'s RSVP`}
+                              // Shift-click skips the confirm, same shortcut
+                              // the admin tables already use for deletes.
+                              onClick={(e) =>
+                                e.shiftKey ? deleteRsvp(rsvp, index) : setConfirmingId(rsvp.id)
+                              }
+                              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-1)] hover:text-[var(--color-danger)] transition-colors"
+                            >
+                              <Trash2 className="h-4 w-4" strokeWidth={2} />
+                            </button>
+                          </ThemedTooltip>
+                        )}
+                      </div>
+                      {rsvp.attending ? (
+                        <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--color-text-muted)]">
+                          {categories.map((category) => {
+                            const count = rsvp.category_counts[category] ?? 0;
+                            return (
+                              <span key={category} className="whitespace-nowrap">
+                                <span className="font-semibold text-[var(--color-text-primary)]">{count}</span>{" "}
+                                {categoryLabelForCount(category, count)}
+                              </span>
+                            );
+                          })}
+                        </span>
+                      ) : (
+                        // Same swatch colour as the pie's own slice, so the
+                        // two halves of this view read as one thing.
+                        <span className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+                          <span
+                            className="h-2 w-2 rounded-full"
+                            style={{ backgroundColor: declinedColor }}
+                            aria-hidden="true"
+                          />
+                          {DECLINED_LABEL}
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>

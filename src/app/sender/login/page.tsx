@@ -6,6 +6,7 @@ import { AuthCard } from "@/components/ui/AuthCard";
 import { Input, Label } from "@/components/ui/Input";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
@@ -16,6 +17,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 export default function SenderLoginPage() {
   const router = useRouter();
+  const showToast = useToast();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
@@ -63,7 +65,9 @@ export default function SenderLoginPage() {
       });
       router.push("/sender");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An unknown error occurred");
+      const message = err instanceof Error ? err.message : "An unknown error occurred";
+      setError(message);
+      showToast(`Login failed \u2014 ${message}`, "error");
       setIsLoading(false);
     }
   };

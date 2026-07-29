@@ -18,7 +18,14 @@ let initPromise: Promise<void> | null = null;
 
 export function initDb(): Promise<void> {
   if (!initPromise) {
-    initPromise = migrate();
+    // Clear the memo on failure so the next request retries. Without this, a
+    // single transient failure (Postgres not up yet on a cold start) caches a
+    // permanently-rejected promise, and every later request in the process
+    // re-throws that same original error until the server is restarted.
+    initPromise = migrate().catch((err) => {
+      initPromise = null;
+      throw err;
+    });
   }
   return initPromise;
 }
@@ -112,4 +119,22 @@ async function migrate(): Promise<void> {
   // rather than in events' own CREATE TABLE block above.
   await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id) ON DELETE SET NULL;`);
   await pool.query(`CREATE INDEX IF NOT EXISTS events_created_by_idx ON events(created_by);`);
+
+  // Login and signup both look users up case-insensitively
+  // (lower(username) = lower($1)), but the column's own UNIQUE constraint is
+  // case-sensitive -- so "Bob" and "bob" could both exist as separate rows
+  // and the login lookup would then match two rows and pick one arbitrarily.
+  // This index makes the database enforce the same uniqueness rule the auth
+  // code assumes. Tolerated (not fatal) if it can't be created, since a dev
+  // database that already contains case-duplicate usernames would otherwise
+  // fail to start at all -- the warning says exactly what to clean up.
+  try {
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (lower(username));`);
+  } catch {
+    console.warn(
+      "[db] Could not create users_username_lower_idx — the users table likely already " +
+      "contains usernames that differ only by case. Resolve those duplicates so " +
+      "case-insensitive login stays unambiguous.",
+    );
+  }
 }

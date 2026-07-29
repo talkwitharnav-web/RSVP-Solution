@@ -24,7 +24,12 @@ export default function NotFound() {
         The page you&rsquo;re looking for doesn&rsquo;t exist, or the link isn&rsquo;t ready yet.
       </p>
 
-      <Link href="/">
+      {/* /sender/landing, not "/" -- the gateway at "/" is localhost-only, so
+          for anyone hitting a bad link from another device (which is most of
+          the people who will ever see this page) a "Back to home" button
+          pointing there just lands them on a second 404. The landing page is
+          the only genuinely public entry point. */}
+      <Link href="/sender/landing">
         <Button variant="primary" size="lg">
           <Home className="h-4 w-4" strokeWidth={2.25} />
           Back to home

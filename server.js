@@ -1,4 +1,5 @@
 const { createServer } = require("http");
+const { networkInterfaces } = require("os");
 const next = require("next");
 const { WebSocketServer } = require("ws");
 
@@ -20,6 +21,10 @@ globalThis.__rsvpWsClients = globalThis.__rsvpWsClients || new Set();
 const clients = globalThis.__rsvpWsClients;
 
 const HEARTBEAT_INTERVAL_MS = 10000;
+// The client set is unbounded otherwise -- anything on the LAN could hold
+// open as many sockets as it liked and grow this process's memory with it.
+// Far above any plausible real usage (a handful of tabs per guest).
+const MAX_WS_CLIENTS = 200;
 
 function broadcast(message) {
   const payload = JSON.stringify(message);
@@ -51,10 +56,20 @@ app.prepare().then(() => {
 
   wss.on("connection", (ws) => {
     clients.add(ws);
+    // Liveness flag for the ping sweep below -- a client that drops off the
+    // network without a clean close (phone leaves wifi, laptop sleeps) leaves
+    // a socket that still reports readyState OPEN, so without an explicit
+    // ping/pong those entries accumulate in `clients` and every broadcast
+    // keeps writing to them.
+    ws.isAlive = true;
+    ws.on("pong", () => {
+      ws.isAlive = true;
+    });
     // Send an immediate heartbeat on connect so the client doesn't sit in
     // "unknown" status for up to HEARTBEAT_INTERVAL_MS after first opening.
     ws.send(JSON.stringify({ type: "heartbeat", status: "healthy", at: Date.now() }));
     ws.on("close", () => clients.delete(ws));
+    ws.on("error", () => clients.delete(ws));
   });
 
   const nextUpgradeHandler = app.getUpgradeHandler();
@@ -83,6 +98,11 @@ app.prepare().then(() => {
         return;
       }
 
+      if (clients.size >= MAX_WS_CLIENTS) {
+        socket.destroy();
+        return;
+      }
+
       wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit("connection", ws);
       });
@@ -94,12 +114,60 @@ app.prepare().then(() => {
 
   if (!globalThis.__rsvpHeartbeatInterval) {
     globalThis.__rsvpHeartbeatInterval = setInterval(() => {
+      // Drop anything that didn't answer the previous ping before sending the
+      // next round, so half-open sockets are reaped rather than accumulating.
+      for (const ws of clients) {
+        if (ws.isAlive === false) {
+          clients.delete(ws);
+          ws.terminate();
+          continue;
+        }
+        ws.isAlive = false;
+        try {
+          ws.ping();
+        } catch {
+          clients.delete(ws);
+        }
+      }
       broadcast({ type: "heartbeat", status: "healthy", at: Date.now() });
     }, HEARTBEAT_INTERVAL_MS);
   }
 
   server.listen(port, hostname, () => {
     console.log(`> Ready on http://localhost:${port} (ws endpoint: /ws)`);
-    console.log(`> Also reachable on your LAN at http://<this-machine-IP>:${port}`);
+    const lanAddresses = findLanAddresses();
+    if (lanAddresses.length > 0) {
+      for (const address of lanAddresses) {
+        console.log(`> On your network:  http://${address}:${port}`);
+      }
+      console.log(
+        "> If a phone on the same Wi-Fi can't load that, Windows Firewall is blocking it —\n" +
+        ">   run scripts/allow-lan.ps1 once from an elevated PowerShell.",
+      );
+    } else {
+      console.log("> No LAN address detected (not connected to a network?)");
+    }
+    console.log("> Admin pages (/ and /admin/*) are localhost-only by design.");
   });
 });
+
+/**
+ * The real addresses another device on the same network can reach this
+ * machine at. Printing a literal "<this-machine-IP>" placeholder meant the
+ * first thing anyone had to do was go dig the address out of ipconfig.
+ * Virtual adapters (WSL, Hyper-V's Default Switch) and link-local 169.254.x
+ * fallbacks are filtered out -- they're real IPv4 addresses but nothing on
+ * the actual Wi-Fi can route to them, so listing them just misleads.
+ */
+function findLanAddresses() {
+  const addresses = [];
+  for (const [name, entries] of Object.entries(networkInterfaces())) {
+    if (/WSL|Default Switch|Bluetooth|Loopback|vEthernet/i.test(name)) continue;
+    for (const entry of entries || []) {
+      if (entry.family !== "IPv4" || entry.internal) continue;
+      if (entry.address.startsWith("169.254.")) continue;
+      addresses.push(entry.address);
+    }
+  }
+  return addresses;
+}

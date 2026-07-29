@@ -263,3 +263,122 @@ export const DESIGN_FONT_PAIRS: DesignFontPair[] = [
 export function getDesignFontPair(id: string): DesignFontPair {
   return DESIGN_FONT_PAIRS.find((f) => f.id === id) ?? DESIGN_FONT_PAIRS[0];
 }
+
+/**
+ * Every individual face across the pairs, flattened and deduplicated -- the
+ * registry behind per-selection font overrides ("select this bit of text and
+ * change only its font"). The pair list stays the card-wide setting; this is
+ * the escape hatch for one heading, or one word inside one heading.
+ *
+ * The id comes from the hand-authored CSS variable name, never from the
+ * family name next/font generates, for exactly the reason fontPairId exists:
+ * generated names are build artifacts and must not be persisted.
+ */
+export type DesignFontFamily = {
+  id: string;
+  name: string;
+  cssVar: string;
+  /** Which half of its pair this face is, so the picker can group sensibly. */
+  role: DesignFontRole;
+};
+
+function familyIdFromVar(cssVar: string): string {
+  return cssVar
+    .trim()
+    .replace(/^var\(\s*/, "")
+    .replace(/\s*\)$/, "")
+    .replace(/^--/, "");
+}
+
+/**
+ * Most pair names are already "Display & Body", which splits into two real
+ * font names. The handful of thematically named pairs ("Editorial",
+ * "Playful") have no such split, so their faces are labelled by role rather
+ * than inventing a font name that might be wrong.
+ */
+function splitPairName(pair: DesignFontPair): [string, string] {
+  const cleaned = pair.name.replace(/\s*\(.*\)\s*$/, "").trim();
+  const parts = cleaned.split("&").map((p) => p.trim());
+  if (parts.length === 2 && parts[0] && parts[1]) return [parts[0], parts[1]];
+  return [`${cleaned} heading`, `${cleaned} body`];
+}
+
+export const DESIGN_FONT_FAMILIES: DesignFontFamily[] = (() => {
+  const seen = new Map<string, DesignFontFamily>();
+  // Several pairs reuse the same face for their body half (Karla, Mulish,
+  // Nunito and Poppins each appear in more than one pair), so the list is
+  // deduplicated by name as well as by variable -- otherwise the picker shows
+  // the same font several times with no way to tell the entries apart.
+  const seenNames = new Set<string>();
+  for (const pair of DESIGN_FONT_PAIRS) {
+    const [displayName, bodyName] = splitPairName(pair);
+    const faces: [string, string, DesignFontRole][] = [
+      [pair.displayVar, displayName, "display"],
+      [pair.bodyVar, bodyName, "body"],
+    ];
+    for (const [cssVar, name, role] of faces) {
+      const id = familyIdFromVar(cssVar);
+      if (seen.has(id) || seenNames.has(name)) continue;
+      seen.set(id, { id, name, cssVar, role });
+      seenNames.add(name);
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+})();
+
+export function getDesignFontFamily(id: string): DesignFontFamily | undefined {
+  return DESIGN_FONT_FAMILIES.find((f) => f.id === id);
+}
+
+/** Real, resolved family name for a stable family id -- "" when unknown. */
+export function resolveFontFamilyById(id: string): string {
+  const family = getDesignFontFamily(id);
+  return family ? resolveFontFamily(family.cssVar) : "";
+}
+
+/** Which half of a font pair a given canvas text object uses. */
+export type DesignFontRole = "display" | "body";
+
+/**
+ * A canvas 2D context builds its font from a plain CSS font shorthand string
+ * and does NOT resolve custom properties -- handing Fabric
+ * "var(--font-design-editorial-display)" as a fontFamily silently falls back
+ * to the browser default, which is why every card rendered in Times New
+ * Roman regardless of the pair the sender picked. This reads the variable's
+ * actual value (next/font generates something like
+ * '__Playfair_Display_abc123, __Playfair_Display_Fallback_abc123') off the
+ * documentElement, where layout.tsx applies every font class.
+ *
+ * Client-only: getComputedStyle needs a real DOM.
+ */
+export function resolveFontFamily(varExpression: string): string {
+  if (typeof window === "undefined") return "";
+  const name = varExpression.trim().replace(/^var\(\s*/, "").replace(/\s*\)$/, "");
+  if (!name.startsWith("--")) return varExpression;
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+export function resolveFontPairFamilies(id: string): Record<DesignFontRole, string> {
+  const pair = getDesignFontPair(id);
+  return {
+    display: resolveFontFamily(pair.displayVar),
+    body: resolveFontFamily(pair.bodyVar),
+  };
+}
+
+/**
+ * next/font declares its @font-face blocks up front, but the browser only
+ * fetches the file once something actually needs to paint with it -- and a
+ * canvas draw doesn't count. Without waiting here, Fabric measures and draws
+ * text before the face is available, then never re-renders once it arrives,
+ * so the card silently keeps the fallback font. document.fonts.load needs a
+ * full shorthand (a size is required, not just a family name).
+ */
+export async function ensureFontsLoaded(families: string[]): Promise<void> {
+  if (typeof document === "undefined" || !document.fonts) return;
+  await Promise.all(
+    families
+      .filter(Boolean)
+      .map((family) => document.fonts.load(`48px ${family}`).catch(() => undefined)),
+  );
+}
