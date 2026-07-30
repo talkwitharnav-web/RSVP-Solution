@@ -3,8 +3,9 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { ArrowRight, FileImage, ChartPie, Link2, Check, Trash2 } from "lucide-react";
+import { ArrowRight, FileImage, ChartPie, Link2, Check, Trash2, Loader2 } from "lucide-react";
 import { useDropdownReveal } from "@/lib/useDropdownReveal";
+import { useInfiniteScroll } from "@/lib/useInfiniteScroll";
 import { useWebSocket } from "@/lib/useWebSocket";
 import { useOptimisticActions, reinsertAt } from "@/lib/optimistic";
 import { useToast } from "@/components/ui/Toast";
@@ -24,13 +25,17 @@ export function InvitationGallery() {
   const [events, setEvents] = useState<SenderEventSummary[] | null>(null);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [infiniteScrollBlocked, setInfiniteScrollBlocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadingOffsetRef = useRef<number | null>(null);
   const { messagesByType } = useWebSocket();
   const dbChanged = messagesByType["db-changed"];
   const { run } = useOptimisticActions();
 
-  const load = (offset = 0, append = false) => {
-    fetchJson<{ events: SenderEventSummary[]; nextOffset: number | null }>(`/api/sender/events?offset=${offset}`)
+  const load = (offset = 0, append = false) =>
+    fetchJson<{ events: SenderEventSummary[]; nextOffset: number | null }>(
+      `/api/sender/events?offset=${offset}`,
+    )
       .then((data) => {
         setEvents((previous) => {
           if (!append || !previous) return data.events;
@@ -38,15 +43,37 @@ export function InvitationGallery() {
           return [...previous, ...data.events.filter((event) => !existingIds.has(event.id))];
         });
         setNextOffset(data.nextOffset);
+        setInfiniteScrollBlocked(false);
         setError(null);
+        return true;
       })
       .catch((err) => {
         const message = err instanceof Error ? err.message : "Something went wrong";
         setError(message);
         showToast(`Couldn't load your invitations \u2014 ${message}`, "error");
+        return false;
+      });
+
+  const loadNextPage = () => {
+    if (nextOffset === null || loadingOffsetRef.current !== null) return;
+    const offset = nextOffset;
+    loadingOffsetRef.current = offset;
+    setLoadingMore(true);
+    void load(offset, true)
+      .then((loaded) => {
+        if (!loaded) setInfiniteScrollBlocked(true);
       })
-      .finally(() => setLoadingMore(false));
+      .finally(() => {
+        loadingOffsetRef.current = null;
+        setLoadingMore(false);
+      });
   };
+
+  const infiniteScrollRef = useInfiniteScroll({
+    enabled: nextOffset !== null && !infiniteScrollBlocked,
+    loading: loadingMore,
+    onLoadMore: loadNextPage,
+  });
 
   // The card disappears immediately and comes back where it was if the
   // server refuses -- see lib/optimistic.ts. Lives here (not InvitationCard)
@@ -67,6 +94,12 @@ export function InvitationGallery() {
     load();
     // Runs once on mount; showToast is stable for the provider's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const resumeInfiniteScroll = () => setInfiniteScrollBlocked(false);
+    window.addEventListener("online", resumeInfiniteScroll);
+    return () => window.removeEventListener("online", resumeInfiniteScroll);
   }, []);
 
   // Live-refreshes the whole grid on any event/RSVP change -- a new card
@@ -105,18 +138,11 @@ export function InvitationGallery() {
               <InvitationCard key={event.id} event={event} onDelete={() => deleteEvent(event, index)} />
             ))}
           </div>
-          {nextOffset !== null && (
-            <button
-              type="button"
-              disabled={loadingMore}
-              onClick={() => {
-                setLoadingMore(true);
-                load(nextOffset, true);
-              }}
-              className="mt-6 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface-1)] px-4 py-2 text-sm font-semibold text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loadingMore ? "Loading..." : "Load more"}
-            </button>
+          {nextOffset !== null && !infiniteScrollBlocked && (
+            <div ref={infiniteScrollRef} role="status" aria-live="polite" className="flex h-12 items-center justify-center">
+              {loadingMore && <Loader2 className="h-5 w-5 animate-spin text-[var(--color-text-muted)]" aria-hidden />}
+              <span className="sr-only">{loadingMore ? "Loading more invitations" : ""}</span>
+            </div>
           )}
         </>
       )}
@@ -134,6 +160,7 @@ function InvitationCard({ event, onDelete }: { event: SenderEventSummary; onDele
   const [copied, setCopied] = useState(false);
   const [deleteHovered, setDeleteHovered] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
   const arrowRef = useRef<HTMLSpanElement>(null);
   const statsRef = useRef<HTMLButtonElement>(null);
   const copyRef = useRef<HTMLButtonElement>(null);
@@ -179,17 +206,21 @@ function InvitationCard({ event, onDelete }: { event: SenderEventSummary; onDele
       aria-label={`Continue editing ${event.title}`}
       className="group relative aspect-[3/4] w-full cursor-pointer overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-1)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-lavender)]"
     >
-      {event.card_image_url ? (
+      <div className="absolute inset-0 flex items-center justify-center bg-[var(--color-surface-2)]">
+        <FileImage className="h-10 w-10 text-[var(--color-text-muted)]" strokeWidth={1.5} />
+      </div>
+      {event.card_image_version && (
         // eslint-disable-next-line @next/next/no-img-element -- user-uploaded/stored data URLs, not an optimizable static asset
         <img
-          src={event.card_image_url}
+          src={`/api/sender/events/${encodeURIComponent(event.slug)}/card-image?v=${event.card_image_version}`}
           alt=""
-          className="absolute inset-0 h-full w-full object-cover"
+          loading="lazy"
+          decoding="async"
+          onLoad={() => setImageLoaded(true)}
+          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${
+            imageLoaded ? "opacity-100" : "opacity-0"
+          }`}
         />
-      ) : (
-        <div className="absolute inset-0 flex items-center justify-center bg-[var(--color-surface-2)]">
-          <FileImage className="h-10 w-10 text-[var(--color-text-muted)]" strokeWidth={1.5} />
-        </div>
       )}
 
       {/* Two stacked gradient layers instead of switching one element's

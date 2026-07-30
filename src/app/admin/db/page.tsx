@@ -26,6 +26,7 @@ import { ThemedTooltip } from "@/components/ui/ThemedTooltip";
 import { StrengthMeter } from "@/components/ui/StrengthMeter";
 import { scorePasswordStrength } from "@/lib/credential-strength";
 import { useWebSocket } from "@/lib/useWebSocket";
+import { useInfiniteScroll } from "@/lib/useInfiniteScroll";
 import { useOptimisticActions, reinsertAt } from "@/lib/optimistic";
 import type { AdminEventSummary, UserRecord, EventKind } from "@/lib/types";
 
@@ -176,6 +177,7 @@ function AdminDbContent() {
   const [nextUserOffset, setNextUserOffset] = useState<number | null>(null);
   const [nextEventOffset, setNextEventOffset] = useState<number | null>(null);
   const [loadingMoreTable, setLoadingMoreTable] = useState<"users" | "events" | null>(null);
+  const [blockedInfiniteScroll, setBlockedInfiniteScroll] = useState({ users: false, events: false });
   const [isLoading, setIsLoading] = useState(true);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
@@ -198,6 +200,9 @@ function AdminDbContent() {
   // Set when a db-changed push arrives mid-flight and had to be ignored, so
   // the deferred refetch still happens once everything is confirmed.
   const missedRefreshRef = useRef(false);
+  const loadingMoreTableRef = useRef<"users" | "events" | null>(null);
+  const userScrollRootRef = useRef<HTMLDivElement>(null);
+  const eventScrollRootRef = useRef<HTMLDivElement>(null);
 
   const reload = useCallback(async () => {
     const data = await fetchJson<AdminDbResponse>("/api/dev/db");
@@ -205,11 +210,13 @@ function AdminDbContent() {
     setEvents(data.events);
     setNextUserOffset(data.nextUserOffset);
     setNextEventOffset(data.nextEventOffset);
+    setBlockedInfiniteScroll({ users: false, events: false });
   }, []);
 
   const loadMore = async (table: "users" | "events") => {
     const offset = table === "users" ? nextUserOffset : nextEventOffset;
-    if (offset === null || loadingMoreTable) return;
+    if (offset === null || loadingMoreTableRef.current) return;
+    loadingMoreTableRef.current = table;
     setLoadingMoreTable(table);
     try {
       const offsetKey = table === "users" ? "userOffset" : "eventOffset";
@@ -227,12 +234,30 @@ function AdminDbContent() {
         });
         setNextEventOffset(data.nextEventOffset);
       }
+      setBlockedInfiniteScroll((previous) => ({ ...previous, [table]: false }));
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Couldn't load more rows", "error");
+      setBlockedInfiniteScroll((previous) => ({ ...previous, [table]: true }));
+      showToast(error instanceof Error ? error.message : "Couldn't continue loading this table", "error");
     } finally {
+      loadingMoreTableRef.current = null;
       setLoadingMoreTable(null);
     }
   };
+
+  const userInfiniteScrollRef = useInfiniteScroll({
+    enabled: nextUserOffset !== null && !blockedInfiniteScroll.users,
+    loading: loadingMoreTable !== null,
+    onLoadMore: () => void loadMore("users"),
+    rootRef: userScrollRootRef,
+    rootMargin: "240px 0px",
+  });
+  const eventInfiniteScrollRef = useInfiniteScroll({
+    enabled: nextEventOffset !== null && !blockedInfiniteScroll.events,
+    loading: loadingMoreTable !== null,
+    onLoadMore: () => void loadMore("events"),
+    rootRef: eventScrollRootRef,
+    rootMargin: "240px 0px",
+  });
 
   useEffect(() => {
     fetchJson<{ authenticated: boolean; admin: boolean }>("/api/session")
@@ -255,6 +280,12 @@ function AdminDbContent() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     reload().finally(() => setIsLoading(false));
   }, [reload, isAdminAuthenticated]);
+
+  useEffect(() => {
+    const resumeInfiniteScroll = () => setBlockedInfiniteScroll({ users: false, events: false });
+    window.addEventListener("online", resumeInfiniteScroll);
+    return () => window.removeEventListener("online", resumeInfiniteScroll);
+  }, []);
 
   // Live updates: any API route that inserts/updates/deletes a users or
   // events row calls broadcastDbChanged() (see lib/ws-broadcast.ts), which
@@ -680,8 +711,9 @@ function AdminDbContent() {
                 </Button>
               </div>
             </div>
-            <Card className="!p-0 overflow-x-auto max-h-[40vh] overflow-y-auto">
-              <table className="min-w-full text-sm">
+            <Card className="!p-0 overflow-hidden max-h-[40vh] flex flex-col">
+              <div ref={userScrollRootRef} className="min-h-0 flex-1 overflow-x-auto overflow-y-auto">
+                <table className="min-w-full text-sm">
                 <thead className="sticky top-0 bg-[var(--color-surface-1)] z-20 shadow-[0_1px_0_var(--color-border)]">
                   <tr className="border-b border-[var(--color-border)]">
                     <SortableTh
@@ -780,18 +812,17 @@ function AdminDbContent() {
                     ))
                   )}
                 </tbody>
-              </table>
+                </table>
+                {nextUserOffset !== null && !blockedInfiniteScroll.users && (
+                  <div ref={userInfiniteScrollRef} role="status" aria-live="polite" className="flex h-10 items-center justify-center">
+                    {loadingMoreTable === "users" && (
+                      <Loader2 size={18} className="animate-spin text-[var(--color-text-muted)]" aria-hidden />
+                    )}
+                    <span className="sr-only">{loadingMoreTable === "users" ? "Loading more users" : ""}</span>
+                  </div>
+                )}
+              </div>
             </Card>
-            {nextUserOffset !== null && (
-              <Button
-                variant="secondary"
-                className="mt-3"
-                disabled={loadingMoreTable !== null}
-                onClick={() => void loadMore("users")}
-              >
-                {loadingMoreTable === "users" ? "Loading..." : "Load more users"}
-              </Button>
-            )}
           </section>
 
           <section>
@@ -829,7 +860,7 @@ function AdminDbContent() {
               </div>
             </div>
             <Card className="!p-0 overflow-hidden max-h-[55vh] flex flex-col relative">
-              <div className="overflow-x-auto overflow-y-auto flex-1">
+              <div ref={eventScrollRootRef} className="overflow-x-auto overflow-y-auto flex-1">
                 <table className="min-w-full text-sm">
                   <thead className="sticky top-0 bg-[var(--color-surface-1)] z-20 shadow-[0_1px_0_var(--color-border)]">
                     <tr className="border-b border-[var(--color-border)]">
@@ -906,18 +937,16 @@ function AdminDbContent() {
                     )}
                   </tbody>
                 </table>
+                {nextEventOffset !== null && !blockedInfiniteScroll.events && (
+                  <div ref={eventInfiniteScrollRef} role="status" aria-live="polite" className="flex h-10 items-center justify-center">
+                    {loadingMoreTable === "events" && (
+                      <Loader2 size={18} className="animate-spin text-[var(--color-text-muted)]" aria-hidden />
+                    )}
+                    <span className="sr-only">{loadingMoreTable === "events" ? "Loading more RSVP links" : ""}</span>
+                  </div>
+                )}
               </div>
             </Card>
-            {nextEventOffset !== null && (
-              <Button
-                variant="secondary"
-                className="mt-3"
-                disabled={loadingMoreTable !== null}
-                onClick={() => void loadMore("events")}
-              >
-                {loadingMoreTable === "events" ? "Loading..." : "Load more RSVP links"}
-              </Button>
-            )}
           </section>
         </div>
       </div>

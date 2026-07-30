@@ -11,7 +11,7 @@ const ADMIN_PAGE_SIZE = 100;
 
 function safeOffset(value: string | null): number {
   const offset = Number(value);
-  return Number.isSafeInteger(offset) && offset > 0 ? Math.min(offset, 10000) : 0;
+  return Number.isSafeInteger(offset) && offset > 0 ? offset : 0;
 }
 
 export async function GET(req: NextRequest) {

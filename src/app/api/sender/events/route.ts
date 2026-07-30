@@ -15,7 +15,8 @@ export async function GET(req: NextRequest) {
     ? Math.min(requestedOffset, 1000)
     : 0;
   const result = await pool.query<SenderEventSummary>(
-    `SELECT id, slug, kind, title, card_image_url, guest_categories, published
+        `SELECT id, slug, kind, title, guest_categories, published,
+          CASE WHEN card_image_url IS NULL THEN NULL ELSE md5(card_image_url) END AS card_image_version
      FROM events
      WHERE created_by = $1
      ORDER BY created_at DESC

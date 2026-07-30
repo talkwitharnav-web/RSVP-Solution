@@ -30,8 +30,8 @@ export interface EventRecord {
 
 export type SenderEventSummary = Pick<
   EventRecord,
-  "id" | "slug" | "kind" | "title" | "card_image_url" | "guest_categories" | "published"
->;
+  "id" | "slug" | "kind" | "title" | "guest_categories" | "published"
+> & { card_image_version: string | null };
 
 export type AdminEventSummary = Pick<EventRecord, "id" | "slug" | "kind" | "title" | "created_at">;
 

@@ -96,8 +96,15 @@ Everything below is **done and verified against a running app**, not theoretical
   was found by the hammer and fixed/retested.
 - **Current sender limits were introduced by the security pass, not requested
   by the user:** 50 invitations, 100 MiB serialized event storage, 20 creates/
-  hour, 120 updates/10 minutes. Gallery pagination is 12 cards/page; admin is
-  100 rows/table/page. Discuss product policy before changing or removing.
+  hour, 120 updates/10 minutes. Gallery fetches 12 cards/page and admin fetches
+  100 rows/table/page, but both append through invisible-sentinel infinite
+  scroll (no Load more controls). Discuss product policy before changing limits.
+- **Infinite scroll + true gallery image laziness (2026-07-30).** Sender preloads
+  480px before page end; each admin table preloads 240px before its own scroll
+  end; only a spinner appears on slow requests, and connectivity recovery is
+  automatic. Sender summaries carry only `card_image_version`; owner-gated
+  `/api/sender/events/[slug]/card-image?v=...` returns the bytes lazily with
+  private immutable caching. Native `loading="lazy"` + async decode + fade-in.
 - **Two dead routes removed (2026-07-29).** `/create/link` and
   `/create/template` are gone outright (confirmed zero references anywhere
   else first).
@@ -212,8 +219,9 @@ asset source.
   clean-eslint tension solved first.
 - **Security-test data was intentionally retained:** sender
   `security_hammer_1785389430574` / display name "Security Hammer Test" and
-  draft "Security Hammer Draft" (`bbdjg6yj`). Offer cleanup; never delete it
-  or other rows without explicit approval.
+  draft "Security Hammer Draft" (`bbdjg6yj`), plus tiny custom card "Lazy
+  loading verification 1785426211217" (`5kkwemx4`). Offer cleanup; never
+  delete it or other rows without explicit approval.
 
 ---
 

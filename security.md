@@ -263,6 +263,16 @@ tests against the stricter schema.
 
 **Current status:** Fixed and rate-limit verified.
 
+**Current implementation (2026-07-30):** sender listings fetch 12 summaries at
+a time and both admin tables fetch 100 rows at a time, appending through
+invisible IntersectionObserver sentinels rather than visible "Load more"
+controls. Admin event summaries omit media/canvas data. Sender summaries omit
+card-image bytes and carry only `card_image_version`; the browser lazily fetches
+owner-gated raw bytes from `/api/sender/events/[slug]/card-image?v=...` with
+private immutable caching. Slow requests show only a spinner, in-flight loads
+are deduplicated, failures pause instead of looping, and browser `online`
+resumes observation.
+
 **Severity:** Medium  
 **Confidence:** Confirmed
 
