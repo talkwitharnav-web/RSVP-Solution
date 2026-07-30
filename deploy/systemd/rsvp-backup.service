@@ -1,0 +1,11 @@
+[Unit]
+Description=Create and verify an RSVP database backup
+Requires=rsvp-postgres.service
+After=rsvp-postgres.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/rsvp/app/deploy/backup.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

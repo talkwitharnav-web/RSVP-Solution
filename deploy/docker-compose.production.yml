@@ -1,0 +1,27 @@
+name: rsvp-production
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: rsvp-postgres-production
+    restart: unless-stopped
+    env_file:
+      - /etc/rsvp/postgres.env
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: rsvp_prod
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rsvp_prod"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    volumes:
+      - rsvp-postgres-production-data:/var/lib/postgresql/data
+      - ./postgres/init-app-role.sh:/docker-entrypoint-initdb.d/10-rsvp-app-role.sh:ro
+
+volumes:
+  rsvp-postgres-production-data:
+    name: rsvp-postgres-production-data

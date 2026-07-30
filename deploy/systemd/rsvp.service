@@ -1,0 +1,32 @@
+[Unit]
+Description=RSVP production web application
+Requires=rsvp-postgres.service
+After=rsvp-postgres.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rsvp
+Group=rsvp
+WorkingDirectory=/opt/rsvp/app
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/rsvp/app.env
+ExecStartPre=/opt/rsvp/app/deploy/wait-for-postgres.sh 60
+ExecStart=/usr/bin/node /opt/rsvp/app/server.js --production
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

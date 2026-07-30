@@ -1,6 +1,6 @@
 # NEXT_STEPS.md
 
-Handoff for the next session. Rewritten 2026-07-29, so a fresh conversation can
+Handoff for the next session. Updated 2026-07-30, so a fresh conversation can
 pick up with nothing lost.
 
 **Read order for a new session:** `SYSTEM_MEMORY.md` (what's true now) →
@@ -126,35 +126,26 @@ Everything below is **done and verified against a running app**, not theoretical
   refuses. Deliberately *not* applied to Seed/Purge or to anything that
   redirects to a server-minted slug.
 - **macOS-style notification stack**, mounted once in the root layout.
+- **Launch correctness/UX pass complete (2026-07-30).** Publish saves the visible editor state, details/style/canvas edits all participate in unsaved-change guards, uploaded-card dates preserve local time, zero-person attending RSVPs are rejected, sender mobile/touch/keyboard behavior is usable, designed guest cards expose accessible/visible event details, long guest text wraps, the RootLayout script warning is fixed, and only the two app fonts preload eagerly.
+- **Linux Mint deployment kit complete in the repo.** `sudo bash ./server-setup.sh` installs software and production services; normal work is through `sudo rsvp`. Private Postgres, restricted role, systemd startup/restart, staging updates with rollback, verified nightly backups/restores, temporary Cloudflare preview, SSH-only admin, and permanent-domain finalization are implemented. See `deploy/DEPLOYMENT.md`.
 
 ---
 
 ## 2. Recommended next steps, in priority order
 
-### A. Ask the user what they want first
+### A. Install and launch production
 
-They drive priorities by using the app and reporting what's wrong. **Do not
-assume this list is what they want.** Every significant improvement so far
-started from their hands-on feedback, not from a backlog.
+1. Commit/push the current launch/deployment checkpoint without sweeping in unrelated dirty files.
+2. Get the Linux Mint machine's SSH IP/hostname and normal username.
+3. Install from GitHub with `sudo bash ./server-setup.sh`; choose a fresh production database.
+4. Run `sudo rsvp preview` and acceptance-test sender/receiver/WebSockets through the temporary Cloudflare URL.
+5. Once the domain is active in Cloudflare, run `sudo rsvp domain rsvp.yourdomain.com` and verify public sender/receiver plus public admin 404.
+6. Copy at least one verified backup off the Linux machine before real guest data matters.
 
-### B. Guests never see the event details on a designed card
+### B. Ask the user what they want after launch
 
-Still open, still needs the user's call, not implemented:
-
-> Title, host, date, location and description are shown above the card for
-> `custom_card`. On a `designed_template` card they appear
-> nowhere — the guest sees only the canvas and the RSVP form. Unless the
-> sender manually adds a text box saying when and where, guests are never
-> told. `/sender/landing` promises "add the essentials — time, place, host,"
-> which is only true for uploaded cards right now.
-
-Three options, roughly in order of how much work they are: (1) show the
-details underneath the card on the guest page, same as the other two kinds;
-(2) a one-click "Add these to my card" button in the Details tab that drops
-real text objects onto the canvas (stays true to "templates are a starting
-point, not a cage" — they'd be ordinary elements afterwards); (3) leave as-is
-but relabel the Details tab so it's clearly for the dashboard/records, not
-guests.
+They drive priorities by using the app and reporting what's wrong. Do not let
+the backlog delay deployment or silently select a feature for them.
 
 ### C. Artwork for templates *(highest-value if the editor still feels sparse)*
 
@@ -212,7 +203,7 @@ asset source.
   it doesn't erase the historical record, and the user explicitly declined
   rewriting git history to do so. Neither value is written in any md file —
   ask the user directly if admin access is needed.
-- **No tests exist.** Verification scripts are deliberately written to a
+- **No committed app test suite exists.** Verification scripts are deliberately written to a
   scratch directory and deleted after use rather than committed — see
   "Landmines" below for why they can't live in the project root at all, not
   just why they aren't committed. A real suite needs the `require()`/

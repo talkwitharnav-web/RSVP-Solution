@@ -1,0 +1,16 @@
+[Unit]
+Description=RSVP production PostgreSQL
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/docker compose -f /opt/rsvp/app/deploy/docker-compose.production.yml up -d
+ExecStop=/usr/bin/docker compose -f /opt/rsvp/app/deploy/docker-compose.production.yml stop
+TimeoutStartSec=120
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

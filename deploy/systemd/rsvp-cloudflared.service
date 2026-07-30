@@ -1,0 +1,19 @@
+[Unit]
+Description=Cloudflare Tunnel for RSVP
+After=network-online.target rsvp.service
+Wants=network-online.target
+Requires=rsvp.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

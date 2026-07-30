@@ -16,6 +16,34 @@ update record the current implementation after the 2026-07-29 fix/retest pass.
   cookies are enabled, binds to loopback, emits HSTS, and expects a trusted TLS
   reverse proxy, but the actual proxy, certificate, HTTP-to-HTTPS redirect, and
   cloud firewall are not defined in this repository.
+
+## Remediation Update - 2026-07-30
+
+- **S1 restricted role now exists:** `scripts/create-production-db-role.sh`
+  generates a separate least-privilege `rsvp_app` role (no superuser, no
+  CREATEDB/CREATEROLE, table-level CRUD grants only) and a `rsvp_prod`
+  database, independent of the dev `docker-compose.yml`/`postgres/postgres`
+  pair which is untouched. Verified: the app's real migration path and normal
+  CRUD work as `rsvp_app`; `CREATE DATABASE`, `CREATE ROLE`, and reading
+  `pg_shadow` all correctly fail with permission denied, and `rolsuper = f`.
+  Production still needs the operator to actually run the script and point
+  `DATABASE_URL` at the result — not automatic.
+- **V2 proxy mechanism now exists and was end-to-end tested:**
+  `scripts/tls-proxy.mjs` (a runnable Node HTTPS terminator, documented as the
+  header-forwarding spec a real nginx/Caddy config must match) plus
+  `scripts/generate-dev-cert.sh`/`.ps1` for a local self-signed cert. A real
+  production build was run behind it with `FORCE_SECURE_COOKIES=true`: HTTPS
+  served correctly, HSTS present, cookies carried `Secure`, and the
+  trusted-proxy IP chain was proven with comparative curl calls — a spoofed
+  `X-Forwarded-For` sent directly to the app was rejected (404 on an
+  admin-gated path), while the same spoof arriving through the proxy was
+  correctly overridden by the proxy-appended real client IP (307, as
+  expected). WebSocket upgrades over `wss://` also verified. **Still open:**
+  this used a self-signed certificate — a real deployment needs a CA-issued
+  certificate for a real domain (Let's Encrypt or equivalent), and no
+  nginx/Caddy config was tested since neither is installed on this dev
+  machine; `tls-proxy.mjs` itself is usable as the actual production proxy,
+  or as the reference implementation for one.
 - **Accepted risk unchanged:** plaintext sender passwords in `raw_password`.
 - **Dependencies:** `npm audit --omit=dev` reports zero vulnerabilities after
   patched PostCSS/sharp overrides. Nine high findings remain in ESLint's

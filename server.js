@@ -146,6 +146,13 @@ function clientIpForRequest(req) {
   const socketIp = normalizeIp(req.socket.remoteAddress) || "unknown";
   if (dev || !trustedProxyIps.has(socketIp)) return socketIp;
 
+  // Cloudflare Tunnel sends the visitor address in CF-Connecting-IP. Only
+  // trust it after the direct socket has passed the trusted-proxy check
+  // above, so a public client can never grant itself a different identity
+  // by adding this header to a request sent straight to Node.
+  const cloudflareIp = normalizeIp(req.headers["cf-connecting-ip"]);
+  if (cloudflareIp && isIP(cloudflareIp)) return cloudflareIp;
+
   const forwardedFor = req.headers["x-forwarded-for"];
   if (typeof forwardedFor !== "string") return socketIp;
   const candidates = forwardedFor.split(",").map((value) => normalizeIp(value)).filter(Boolean);
