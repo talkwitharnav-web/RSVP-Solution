@@ -133,7 +133,7 @@ export function InvitationGallery() {
 
       {events !== null && events.length > 0 && (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {events.map((event, index) => (
               <InvitationCard key={event.id} event={event} onDelete={() => deleteEvent(event, index)} />
             ))}
@@ -240,17 +240,17 @@ function InvitationCard({ event, onDelete }: { event: SenderEventSummary; onDele
           handler (z-10) so the title text and action buttons remain their
           own hit-targets -- see handleCopyLink/onClick below, each of which
           stops propagation so clicking a button doesn't also navigate. */}
-      <div className="absolute inset-x-0 bottom-0 z-10 flex items-end justify-between gap-2 p-3 pt-10">
+      <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col items-start gap-2 p-3 pt-10 sm:flex-row sm:items-end sm:justify-between">
         {/* min-w-0 is what makes `truncate` produce an ellipsis here. A flex
             item with overflow:hidden gets an automatic minimum size of zero,
             so once the action buttons claim their space on a narrow card the
             title collapsed to width 0 and the invitation showed no name at
             all -- the same flexbox trap already fixed in the Access DB
             tables. flex-1 lets it claim whatever room is left. */}
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-white" title={event.title}>
+        <span className="w-full min-w-0 flex-1 truncate text-sm font-semibold text-white" title={event.title}>
           {event.title}
         </span>
-        <span className="flex flex-shrink-0 items-center gap-1.5">
+        <span className="flex flex-shrink-0 items-center gap-1.5 self-end">
           <button
             type="button"
             ref={deleteRef}
@@ -265,9 +265,7 @@ function InvitationCard({ event, onDelete }: { event: SenderEventSummary; onDele
             onMouseEnter={() => setDeleteHovered(true)}
             onMouseLeave={() => setDeleteHovered(false)}
             aria-label={`Delete ${event.title}`}
-            className={`flex h-8 w-8 items-center justify-center rounded-full bg-white text-[var(--color-danger)] transition-opacity duration-200 ${
-              hovered ? "opacity-100" : "opacity-0 pointer-events-none"
-            }`}
+            className="invitation-card-action flex h-11 w-11 items-center justify-center rounded-full bg-white text-[var(--color-danger)] transition-opacity duration-200 sm:h-8 sm:w-8"
           >
             <Trash2 className="h-4 w-4" strokeWidth={2.5} />
           </button>
@@ -279,9 +277,7 @@ function InvitationCard({ event, onDelete }: { event: SenderEventSummary; onDele
               onMouseEnter={() => setCopyHovered(true)}
               onMouseLeave={() => setCopyHovered(false)}
               aria-label={`Copy receiver link for ${event.title}`}
-              className={`flex h-8 w-8 items-center justify-center rounded-full bg-white text-black transition-opacity duration-200 ${
-                hovered ? "opacity-100" : "opacity-0 pointer-events-none"
-              }`}
+              className="invitation-card-action flex h-11 w-11 items-center justify-center rounded-full bg-white text-black transition-opacity duration-200 sm:h-8 sm:w-8"
             >
               {copied ? (
                 <Check className="h-4 w-4 text-[var(--color-success)]" strokeWidth={2.5} />
@@ -301,9 +297,7 @@ function InvitationCard({ event, onDelete }: { event: SenderEventSummary; onDele
             onMouseEnter={() => setStatsHovered(true)}
             onMouseLeave={() => setStatsHovered(false)}
             aria-label={`View statistics for ${event.title}`}
-            className={`flex h-8 w-8 items-center justify-center rounded-full bg-white text-black transition-opacity duration-200 ${
-              hovered ? "opacity-100" : "opacity-0 pointer-events-none"
-            }`}
+            className="invitation-card-action flex h-11 w-11 items-center justify-center rounded-full bg-white text-black transition-opacity duration-200 sm:h-8 sm:w-8"
           >
             <ChartPie className="h-4 w-4" strokeWidth={2.5} />
           </button>
@@ -311,9 +305,7 @@ function InvitationCard({ event, onDelete }: { event: SenderEventSummary; onDele
             ref={arrowRef}
             onMouseEnter={() => setArrowHovered(true)}
             onMouseLeave={() => setArrowHovered(false)}
-            className={`flex h-8 w-8 items-center justify-center rounded-full bg-white text-black transition-opacity duration-200 ${
-              hovered ? "opacity-100" : "opacity-0 pointer-events-none"
-            }`}
+            className="invitation-card-action flex h-11 w-11 items-center justify-center rounded-full bg-white text-black transition-opacity duration-200 sm:h-8 sm:w-8"
           >
             <ArrowRight className="h-4 w-4" strokeWidth={2.5} />
           </span>

@@ -28,10 +28,10 @@ export default function SenderLandingPage() {
 
   return (
     <div className="min-h-dvh flex flex-col">
-      <header className="flex items-center justify-between gap-4 px-6 py-5 sm:px-10">
-        <div className="flex items-center gap-2 text-[var(--color-accent-lavender)]">
+      <header className="flex items-center justify-between gap-2 px-4 py-5 sm:gap-4 sm:px-10">
+        <div className="flex min-w-0 items-center gap-2 text-[var(--color-accent-lavender)]">
           <MailOpen className="h-5 w-5" strokeWidth={2} />
-          <span className="font-display text-xl font-semibold text-[var(--color-text-primary)]">
+          <span className="whitespace-nowrap font-display text-lg font-semibold text-[var(--color-text-primary)] sm:text-xl">
             RSVP Sender
           </span>
         </div>
@@ -41,8 +41,8 @@ export default function SenderLandingPage() {
             margin rather than a width-tracking reserve: the pill should draw
             over things when it expands, not make the header shuffle around
             as it opens and closes. */}
-        <div className="mr-11 flex items-center gap-3">
-          <Link href="/sender/login">
+        <div className="mr-11 flex flex-shrink-0 items-center gap-2 sm:gap-3">
+          <Link href="/sender/login" className="hidden sm:block">
             <Button variant="secondary">Log In</Button>
           </Link>
           <Link href="/sender/signup">
@@ -60,15 +60,15 @@ export default function SenderLandingPage() {
             Create a beautiful RSVP page in minutes, share one link, and watch responses roll in —
             no spreadsheets, no group texts, no guessing who&apos;s coming.
           </p>
-          <div className="flex items-center justify-center gap-3">
-            <Link href="/sender/signup">
-              <Button size="lg" variant="primary">
+          <div className="flex flex-col items-stretch justify-center gap-3 min-[360px]:flex-row min-[360px]:items-center">
+            <Link href="/sender/signup" className="w-full min-[360px]:w-auto">
+              <Button size="lg" variant="primary" className="w-full">
                 Get Started
                 <ArrowRight className="w-4 h-4" />
               </Button>
             </Link>
-            <Link href="/sender/login">
-              <Button size="lg" variant="secondary">
+            <Link href="/sender/login" className="w-full min-[360px]:w-auto">
+              <Button size="lg" variant="secondary" className="w-full">
                 Log In
               </Button>
             </Link>

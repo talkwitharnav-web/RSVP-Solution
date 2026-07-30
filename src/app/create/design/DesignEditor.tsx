@@ -125,6 +125,7 @@ export default function DesignEditor({ initialEvent }: { initialEvent?: EventRec
   // Tracks edits made since the last successful save, so navigating away
   // can warn instead of silently discarding a design (nothing autosaves).
   const [isDirty, setIsDirty] = useState(false);
+  const [leavePromptOpen, setLeavePromptOpen] = useState(false);
 
   // Saving an existing invitation and publishing are predicted locally and
   // rolled back if the server refuses -- see lib/optimistic.ts.
@@ -226,12 +227,14 @@ export default function DesignEditor({ initialEvent }: { initialEvent?: EventRec
   const updateText = (patch: Partial<SelectedTextProps>) => {
     canvasRef.current?.setSelectedTextProps(patch);
     setTextProps(canvasRef.current?.getSelectedTextProps() ?? null);
+    setIsDirty(true);
   };
 
   /** Empty id means "go back to the card's own font pair". */
   const applySelectionFont = (familyId: string) => {
     void canvasRef.current?.setSelectedFontFamily(familyId).then(() => {
       setTextProps(canvasRef.current?.getSelectedTextProps() ?? null);
+      setIsDirty(true);
     });
   };
 
@@ -302,6 +305,7 @@ export default function DesignEditor({ initialEvent }: { initialEvent?: EventRec
       accent: palette.accent,
       onAccent: palette.onAccent,
     });
+    setIsDirty(true);
     // Only worth asking if there's actually something on the card to recolour.
     if ((canvasRef.current?.getLayers().length ?? 0) > 0) setPendingPalette(palette);
   };
@@ -321,12 +325,11 @@ export default function DesignEditor({ initialEvent }: { initialEvent?: EventRec
     }
   };
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  const buildPayload = () => {
     if (!title.trim()) {
       setTab("details");
       setError("Event title is required.");
-      return;
+      return null;
     }
     const designConfig = {
       fontPairId,
@@ -343,10 +346,10 @@ export default function DesignEditor({ initialEvent }: { initialEvent?: EventRec
     // bound is checked here and reported as a real error instead.
     if (JSON.stringify(designConfig.canvasJSON).length > MAX_CANVAS_JSON_BYTES) {
       setError("This design is too large to save — try removing or replacing one of the images.");
-      return;
+      return null;
     }
 
-    const payload = {
+    return {
       title,
       hostName: hostName || null,
       description: description || null,
@@ -354,6 +357,12 @@ export default function DesignEditor({ initialEvent }: { initialEvent?: EventRec
       location: location || null,
       designConfig,
     };
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    const payload = buildPayload();
+    if (!payload) return;
 
     // Creation is the one thing that genuinely can't be predicted -- it ends
     // in a redirect to a slug only the server can mint, so there's nothing
@@ -415,18 +424,28 @@ export default function DesignEditor({ initialEvent }: { initialEvent?: EventRec
 
   const handlePublish = () => {
     if (!event) return;
+    const payload = buildPayload();
+    if (!payload) return;
     const previousEvent = event;
+    const previousSavedAt = savedAt;
+    const previousDirty = isDirty;
     void run<EventRecord>({
       apply: () => {
         setError(null);
         setEvent((prev) => (prev ? { ...prev, published: true } : prev));
-        return () => setEvent(previousEvent);
+        setSavedAt(Date.now());
+        setIsDirty(false);
+        return () => {
+          setEvent(previousEvent);
+          setSavedAt(previousSavedAt);
+          setIsDirty(previousDirty);
+        };
       },
       commit: async () => {
         const res = await fetch(`/api/events/${previousEvent.slug}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title, published: true }),
+          body: JSON.stringify({ ...payload, published: true }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Something went wrong");
@@ -442,6 +461,28 @@ export default function DesignEditor({ initialEvent }: { initialEvent?: EventRec
 
   return (
     <div className="flex h-screen">
+      <Modal
+        isOpen={leavePromptOpen}
+        title="Discard unsaved changes?"
+        onClose={() => setLeavePromptOpen(false)}
+        danger
+      >
+        <p className="mb-6 text-[var(--color-text-muted)]">
+          Your latest card and event-detail changes have not been saved.
+        </p>
+        <ModalActions
+          onCancel={() => setLeavePromptOpen(false)}
+          onConfirm={() => {
+            setLeavePromptOpen(false);
+            setIsDirty(false);
+            router.push("/sender");
+          }}
+          cancelLabel="Keep editing"
+          confirmLabel="Discard changes"
+          danger
+        />
+      </Modal>
+
       <Modal
         isOpen={pendingPalette !== null}
         title="Match your card to this theme?"
@@ -475,6 +516,11 @@ export default function DesignEditor({ initialEvent }: { initialEvent?: EventRec
         <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-5 py-4">
           <Link
             href="/sender"
+            onNavigate={(navigationEvent) => {
+              if (!isDirty) return;
+              navigationEvent.preventDefault();
+              setLeavePromptOpen(true);
+            }}
             className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
           >
             <ArrowLeft className="h-4 w-4" strokeWidth={2} />
@@ -657,6 +703,7 @@ export default function DesignEditor({ initialEvent }: { initialEvent?: EventRec
                         onChange={(e) => {
                           setRecolorValue(e.target.value);
                           canvasRef.current?.recolorSelected(e.target.value);
+                          setIsDirty(true);
                         }}
                         aria-label="Recolour selected element"
                         className="h-9 w-9 cursor-pointer rounded-[var(--radius-sm)] border border-[var(--color-border-strong)]"
@@ -822,6 +869,7 @@ export default function DesignEditor({ initialEvent }: { initialEvent?: EventRec
                           onClick={() => {
                             setRecolorValue(value);
                             canvasRef.current?.recolorSelected(value);
+                            setIsDirty(true);
                           }}
                           className="h-6 w-6 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)]"
                           style={{ backgroundColor: value }}
@@ -932,14 +980,23 @@ export default function DesignEditor({ initialEvent }: { initialEvent?: EventRec
 
               <div>
                 <Label>Colors</Label>
-                <ColorFieldGroup colors={colors} onChange={setColors} />
+                <ColorFieldGroup
+                  colors={colors}
+                  onChange={(nextColors) => {
+                    setColors(nextColors);
+                    setIsDirty(true);
+                  }}
+                />
               </div>
 
               <div>
                 <Label>Font pairing</Label>
                 <FontPicker
                   value={fontPairId}
-                  onChange={setFontPairId}
+                  onChange={(nextFontPairId) => {
+                    setFontPairId(nextFontPairId);
+                    setIsDirty(true);
+                  }}
                   suggestedIds={matchedPalette?.suggestedFontPairIds ?? []}
                   suggestedForName={matchedPalette?.name}
                 />
@@ -954,26 +1011,62 @@ export default function DesignEditor({ initialEvent }: { initialEvent?: EventRec
               </p>
               <div>
                 <Label htmlFor="title">Event title</Label>
-                <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} required />
+                <Input
+                  id="title"
+                  value={title}
+                  onChange={(e) => {
+                    setTitle(e.target.value);
+                    setIsDirty(true);
+                  }}
+                  maxLength={200}
+                  required
+                />
               </div>
               <div>
                 <Label htmlFor="hostName">Host name (optional)</Label>
-                <Input id="hostName" value={hostName} onChange={(e) => setHostName(e.target.value)} maxLength={300} />
+                <Input
+                  id="hostName"
+                  value={hostName}
+                  onChange={(e) => {
+                    setHostName(e.target.value);
+                    setIsDirty(true);
+                  }}
+                  maxLength={300}
+                />
               </div>
               <div>
                 <Label htmlFor="eventDate">Date &amp; time (optional)</Label>
-                <Input id="eventDate" type="datetime-local" value={eventDate} onChange={(e) => setEventDate(e.target.value)} />
+                <Input
+                  id="eventDate"
+                  type="datetime-local"
+                  value={eventDate}
+                  onChange={(e) => {
+                    setEventDate(e.target.value);
+                    setIsDirty(true);
+                  }}
+                />
               </div>
               <div>
                 <Label htmlFor="location">Location (optional)</Label>
-                <Input id="location" value={location} onChange={(e) => setLocation(e.target.value)} maxLength={300} />
+                <Input
+                  id="location"
+                  value={location}
+                  onChange={(e) => {
+                    setLocation(e.target.value);
+                    setIsDirty(true);
+                  }}
+                  maxLength={300}
+                />
               </div>
               <div>
                 <Label htmlFor="description">Additional details (optional)</Label>
                 <textarea
                   id="description"
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  onChange={(e) => {
+                    setDescription(e.target.value);
+                    setIsDirty(true);
+                  }}
                   rows={3}
                   maxLength={5000}
                   className="w-full px-4 py-3 text-base bg-[var(--color-surface-0)] text-[var(--color-text-primary)] border border-[var(--color-border-strong)] rounded-[var(--radius-sm)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-coral-text)] focus:border-[var(--color-accent-coral-text)] transition-colors"

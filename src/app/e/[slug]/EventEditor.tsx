@@ -2,11 +2,13 @@
 
 import { useState, useEffect, ChangeEvent, FormEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, ImagePlus, Eye, Rocket, Check } from "lucide-react";
 import { Input, Label } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { CopyableValue } from "@/components/ui/CopyableValue";
+import { Modal, ModalActions } from "@/components/ui/Modal";
 import { isAcceptedImageType, isHeicFile, convertHeicToJpeg, prepareCardImage } from "@/lib/image-upload";
 import { formatGuestCategories } from "@/lib/guest-categories";
 import { useOptimisticActions } from "@/lib/optimistic";
@@ -29,6 +31,7 @@ function toDatetimeLocalValue(iso: string | null): string {
  * BringYourOwnCardForm since it's the same underlying upload operation.
  */
 export default function EventEditor({ initialEvent }: { initialEvent: EventRecord }) {
+  const router = useRouter();
   const [event, setEvent] = useState(initialEvent);
   const [title, setTitle] = useState(initialEvent.title);
   const [hostName, setHostName] = useState(initialEvent.host_name ?? "");
@@ -44,6 +47,8 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [receiverOrigin, setReceiverOrigin] = useState("");
+  const [isDirty, setIsDirty] = useState(false);
+  const [leavePromptOpen, setLeavePromptOpen] = useState(false);
 
   // Saving and publishing are predicted locally and rolled back if the
   // server refuses, rather than making the sender watch a round trip --
@@ -88,6 +93,13 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
     setReceiverOrigin(window.location.origin);
   }, []);
 
+  useEffect(() => {
+    if (!isDirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [isDirty]);
+
   const handleImageChange = async (e: ChangeEvent<HTMLInputElement>) => {
     let file = e.target.files?.[0];
     if (!file) return;
@@ -117,6 +129,7 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
       const dataUrl = await prepareCardImage(file);
       setImageDataUrl(dataUrl);
       setImagePreview(dataUrl);
+      setIsDirty(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't process that image.");
     } finally {
@@ -124,12 +137,7 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
     }
   };
 
-  const handleSave = (e: FormEvent) => {
-    e.preventDefault();
-    const previousEvent = event;
-    const previousSavedAt = savedAt;
-    const previousImageDataUrl = imageDataUrl;
-    const payload = {
+  const buildPayload = () => ({
       title,
       hostName: hostName || null,
       description: description || null,
@@ -138,7 +146,14 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
       guestCategories: guestCategoriesText,
       ...(event.kind === "external_link" ? { externalUrl } : {}),
       ...(imageDataUrl ? { cardImageUrl: imageDataUrl } : {}),
-    };
+    });
+
+  const handleSave = (e: FormEvent) => {
+    e.preventDefault();
+    const previousEvent = event;
+    const previousSavedAt = savedAt;
+    const previousImageDataUrl = imageDataUrl;
+    const payload = buildPayload();
 
     void run<EventRecord>({
       apply: () => {
@@ -147,6 +162,7 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
         // show the sender anything they didn't just type.
         setError(null);
         setSavedAt(Date.now());
+        setIsDirty(false);
         setEvent((prev) => ({
           ...prev,
           title,
@@ -161,6 +177,7 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
           setEvent(previousEvent);
           setSavedAt(previousSavedAt);
           setImageDataUrl(previousImageDataUrl);
+          setIsDirty(true);
         };
       },
       commit: async () => {
@@ -183,17 +200,38 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
 
   const handlePublish = () => {
     const previousEvent = event;
+    const previousSavedAt = savedAt;
+    const previousImageDataUrl = imageDataUrl;
+    const previousDirty = isDirty;
+    const payload = buildPayload();
     void run<EventRecord>({
       apply: () => {
         setError(null);
-        setEvent((prev) => ({ ...prev, published: true }));
-        return () => setEvent(previousEvent);
+        setSavedAt(Date.now());
+        setIsDirty(false);
+        setEvent((prev) => ({
+          ...prev,
+          title,
+          host_name: hostName || null,
+          description: description || null,
+          event_date: payload.eventDate,
+          location: location || null,
+          published: true,
+          ...(imageDataUrl ? { card_image_url: imageDataUrl } : {}),
+        }));
+        setImageDataUrl(null);
+        return () => {
+          setEvent(previousEvent);
+          setSavedAt(previousSavedAt);
+          setImageDataUrl(previousImageDataUrl);
+          setIsDirty(previousDirty);
+        };
       },
       commit: async () => {
         const res = await fetch(`/api/events/${event.slug}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title, published: true }),
+          body: JSON.stringify({ ...payload, published: true }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Something went wrong");
@@ -209,9 +247,36 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col gap-6 px-6 py-16">
+      <Modal
+        isOpen={leavePromptOpen}
+        title="Discard unsaved changes?"
+        onClose={() => setLeavePromptOpen(false)}
+        danger
+      >
+        <p className="mb-6 text-[var(--color-text-muted)]">
+          Your latest invitation changes have not been saved.
+        </p>
+        <ModalActions
+          onCancel={() => setLeavePromptOpen(false)}
+          onConfirm={() => {
+            setLeavePromptOpen(false);
+            setIsDirty(false);
+            router.push("/sender");
+          }}
+          cancelLabel="Keep editing"
+          confirmLabel="Discard changes"
+          danger
+        />
+      </Modal>
+
       <div className="flex items-center justify-between gap-3">
         <Link
           href="/sender"
+          onNavigate={(navigationEvent) => {
+            if (!isDirty) return;
+            navigationEvent.preventDefault();
+            setLeavePromptOpen(true);
+          }}
           className="inline-flex items-center gap-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
         >
           <ArrowLeft className="h-4 w-4" strokeWidth={2} />
@@ -300,12 +365,29 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
 
           <div>
             <Label htmlFor="title">Event title</Label>
-            <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} required />
+            <Input
+              id="title"
+              value={title}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                setIsDirty(true);
+              }}
+              maxLength={200}
+              required
+            />
           </div>
 
           <div>
             <Label htmlFor="hostName">Host name</Label>
-            <Input id="hostName" value={hostName} onChange={(e) => setHostName(e.target.value)} maxLength={300} />
+            <Input
+              id="hostName"
+              value={hostName}
+              onChange={(e) => {
+                setHostName(e.target.value);
+                setIsDirty(true);
+              }}
+              maxLength={300}
+            />
           </div>
           {event.kind === "external_link" && (
             <div>
@@ -314,7 +396,10 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
                 id="externalUrl"
                 type="url"
                 value={externalUrl}
-                onChange={(e) => setExternalUrl(e.target.value)}
+                onChange={(e) => {
+                  setExternalUrl(e.target.value);
+                  setIsDirty(true);
+                }}
                 maxLength={2048}
                 placeholder="https://forms.gle/..."
                 required
@@ -326,18 +411,37 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
           )}
           <div>
             <Label htmlFor="eventDate">Date &amp; time</Label>
-            <Input id="eventDate" type="datetime-local" value={eventDate} onChange={(e) => setEventDate(e.target.value)} />
+            <Input
+              id="eventDate"
+              type="datetime-local"
+              value={eventDate}
+              onChange={(e) => {
+                setEventDate(e.target.value);
+                setIsDirty(true);
+              }}
+            />
           </div>
           <div>
             <Label htmlFor="location">Location</Label>
-            <Input id="location" value={location} onChange={(e) => setLocation(e.target.value)} maxLength={300} />
+            <Input
+              id="location"
+              value={location}
+              onChange={(e) => {
+                setLocation(e.target.value);
+                setIsDirty(true);
+              }}
+              maxLength={300}
+            />
           </div>
           <div>
             <Label htmlFor="description">Additional details</Label>
             <textarea
               id="description"
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={(e) => {
+                setDescription(e.target.value);
+                setIsDirty(true);
+              }}
               rows={3}
               maxLength={5000}
               className="w-full px-4 py-3 text-base bg-[var(--color-surface-0)] text-[var(--color-text-primary)] border border-[var(--color-border-strong)] rounded-[var(--radius-sm)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-coral-text)] focus:border-[var(--color-accent-coral-text)] transition-colors"
@@ -350,7 +454,10 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
               <Input
                 id="guestCategories"
                 value={guestCategoriesText}
-                onChange={(e) => setGuestCategoriesText(e.target.value)}
+                onChange={(e) => {
+                  setGuestCategoriesText(e.target.value);
+                  setIsDirty(true);
+                }}
                 placeholder="Adults, Kids"
               />
               <p className="mt-1.5 text-xs text-[var(--color-text-muted)]">

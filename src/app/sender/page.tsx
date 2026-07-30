@@ -43,9 +43,9 @@ export default function SenderDashboardPage() {
   if (checking) return null;
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="flex w-64 flex-shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-1)] px-5 py-6">
-        <div className="mb-8 flex items-center gap-3 px-3 text-[var(--color-accent-lavender)]">
+    <div className="flex min-h-dvh flex-col md:flex-row">
+      <aside className="flex w-full flex-shrink-0 flex-col border-b border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-4 md:min-h-dvh md:w-64 md:border-b-0 md:border-r md:px-5 md:py-6">
+        <div className="mb-4 flex items-center gap-3 px-3 pr-16 text-[var(--color-accent-lavender)] md:mb-8 md:pr-3">
           <MailOpen className="h-4 w-4 flex-shrink-0" strokeWidth={2} />
           <span className="text-xl font-semibold text-[var(--color-text-primary)]">RSVP Sender</span>
         </div>
@@ -53,7 +53,7 @@ export default function SenderDashboardPage() {
         <button
           type="button"
           onClick={() => setNewInvitationOpen(true)}
-          className="mb-4 flex items-center justify-center gap-2 rounded-[var(--radius-sm)] bg-[var(--color-accent-coral-text)] px-3 py-2.5 text-sm font-semibold text-[var(--color-on-coral)] transition-opacity hover:opacity-90"
+          className="mb-3 flex items-center justify-center gap-2 rounded-[var(--radius-sm)] bg-[var(--color-accent-coral-text)] px-3 py-2.5 text-sm font-semibold text-[var(--color-on-coral)] transition-opacity hover:opacity-90 md:mb-4"
         >
           <Plus className="h-4 w-4" strokeWidth={2.5} />
           New Invitation
@@ -76,16 +76,16 @@ export default function SenderDashboardPage() {
           />
         </nav>
 
-        <div className="flex-1" />
+        <div className="hidden flex-1 md:block" />
 
-        <div className="pt-4 mt-4 border-t border-[var(--color-border)]">
-          <p className="px-3 pb-2 text-xs text-[var(--color-text-muted)]">
+        <div className="mt-4 flex flex-col items-stretch gap-1 border-t border-[var(--color-border)] pt-4 md:block">
+          <p className="min-w-0 px-3 pb-2 text-xs text-[var(--color-text-muted)]">
             Signed in as <span className="text-[var(--color-text-primary)] font-medium">{username}</span>
           </p>
           <button
             type="button"
             onClick={handleLogout}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)]"
+            className="flex w-full flex-shrink-0 items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)]"
           >
             <LogOut className="h-4 w-4" strokeWidth={2} />
             Log Out
@@ -93,7 +93,7 @@ export default function SenderDashboardPage() {
         </div>
       </aside>
 
-      <main className="flex-1 px-8 py-10 sm:px-12">
+      <main className="min-w-0 flex-1 px-4 py-6 sm:px-8 md:py-10 lg:px-12">
         {activeTab === "overview" && (
           <div className="max-w-2xl">
             <h1 className="font-display text-2xl sm:text-3xl font-semibold text-[var(--color-text-primary)] mb-3">

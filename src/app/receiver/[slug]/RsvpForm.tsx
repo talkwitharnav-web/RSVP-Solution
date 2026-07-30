@@ -162,6 +162,10 @@ export default function RsvpForm({
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const attendingGuestCount = guestCategories.reduce(
+    (total, category) => total + (categoryCounts[category] ?? 0),
+    0,
+  );
 
   // The thank-you appears the moment the guest submits, rather than after a
   // round trip; if the server refuses (event unpublished, rate limited, bad
@@ -171,6 +175,10 @@ export default function RsvpForm({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (attending && attendingGuestCount < 1) {
+      setError("Please include at least one guest in your RSVP.");
+      return;
+    }
     void run({
       apply: () => {
         setError(null);
@@ -220,13 +228,22 @@ export default function RsvpForm({
         />
       </div>
 
-      <AttendanceToggle attending={attending} onChange={setAttending} />
+      <AttendanceToggle
+        attending={attending}
+        onChange={(value) => {
+          setAttending(value);
+          setError(null);
+        }}
+      />
 
       {attending && (
         <CategoryCounts
           categories={guestCategories}
           counts={categoryCounts}
-          onChange={(category, value) => setCategoryCounts((c) => ({ ...c, [category]: value }))}
+          onChange={(category, value) => {
+            setCategoryCounts((c) => ({ ...c, [category]: value }));
+            setError(null);
+          }}
         />
       )}
 

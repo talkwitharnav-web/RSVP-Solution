@@ -145,6 +145,24 @@ button:not(:disabled),
   cursor: pointer;
 }
 
+.invitation-card-action {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.group:hover .invitation-card-action,
+.group:focus-within .invitation-card-action {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .invitation-card-action {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 h1,
 h2,
 h3,

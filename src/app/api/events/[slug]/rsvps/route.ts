@@ -90,10 +90,14 @@ export async function POST(
   const rawCounts = typeof body.categoryCounts === "object" && body.categoryCounts !== null ? body.categoryCounts : {};
   const categoryCounts: Record<string, number> = {};
   for (const category of guestCategories) {
-    const value = Number(rawCounts[category]);
+    const value = attending ? Number(rawCounts[category]) : 0;
     categoryCounts[category] = Number.isFinite(value) ? Math.min(MAX_CATEGORY_COUNT, Math.max(0, Math.trunc(value))) : 0;
   }
-  const guestCount = Object.values(categoryCounts).reduce((sum, n) => sum + n, 0) || 1;
+  const attendingGuestCount = Object.values(categoryCounts).reduce((sum, count) => sum + count, 0);
+  if (attending && attendingGuestCount < 1) {
+    return NextResponse.json({ error: "At least one guest is required when attending" }, { status: 400 });
+  }
+  const guestCount = attending ? attendingGuestCount : 1;
 
   await pool.query(
     `INSERT INTO rsvps (event_id, guest_name, attending, guest_count, category_counts, answers)

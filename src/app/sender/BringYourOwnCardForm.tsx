@@ -80,7 +80,7 @@ export function BringYourOwnCardForm({ onCancel, onClose }: { onCancel: () => vo
           title,
           hostName: hostName || null,
           description: description || null,
-          eventDate: eventDate || null,
+          eventDate: eventDate ? new Date(eventDate).toISOString() : null,
           location: location || null,
           cardImageUrl: imageDataUrl,
         }),

@@ -21,6 +21,39 @@ function isSafeExternalUrl(url: string | null): url is string {
   }
 }
 
+function EventDetails({ event }: { event: PublicEventRecord }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <h1
+        className="break-words font-display font-semibold text-[var(--color-text-primary)] [overflow-wrap:anywhere]"
+        style={{ fontSize: "clamp(1.75rem, 1.3rem + 1.5vw, 2.75rem)" }}
+      >
+        {event.title}
+      </h1>
+      {event.host_name && (
+        <p className="break-words text-base text-[var(--color-text-muted)] [overflow-wrap:anywhere]">
+          Hosted by {event.host_name}
+        </p>
+      )}
+      {event.description && (
+        <p className="whitespace-pre-wrap break-words text-base text-[var(--color-text-primary)] [overflow-wrap:anywhere]">
+          {event.description}
+        </p>
+      )}
+      {event.event_date && (
+        <time dateTime={event.event_date} className="text-base text-[var(--color-text-muted)]">
+          {new Date(event.event_date).toLocaleString()}
+        </time>
+      )}
+      {event.location && (
+        <p className="break-words text-base text-[var(--color-text-muted)] [overflow-wrap:anywhere]">
+          {event.location}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /**
  * The plain guest-facing view -- no owner chrome, no edit affordances.
  * Subscribes to the same `db-changed` broadcast the Access DB page uses
@@ -58,45 +91,35 @@ export default function GuestEventView({ initialEvent }: { initialEvent: PublicE
       style={{ maxWidth: "clamp(24rem, 60vw, 40rem)" }}
     >
       {event.kind === "designed_template" && event.design_config ? (
-        <div
-          className="mx-auto flex w-full overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)] shadow-lg"
-          style={{
-            // Fills the page's own fluid column rather than being pinned to a
-            // fixed 28rem, which left a card designed at 1000px rendering
-            // noticeably small on a desktop viewport.
-            aspectRatio: `${event.design_config.canvasWidth} / ${event.design_config.canvasHeight}`,
-          }}
-        >
-          {/* Read-only: same fabric.Canvas + same canvasJSON as the editor,
-              interaction disabled -- guarantees the guest sees pixel-identical
-              content to what the sender designed, never a re-derived render. */}
-          <FabricCanvas
-            canvasWidth={event.design_config.canvasWidth}
-            canvasHeight={event.design_config.canvasHeight}
-            initialJSON={event.design_config.canvasJSON}
-            backgroundColor={event.design_config.colors?.background ?? DEFAULT_DESIGN_COLORS.background}
-            fontPairId={event.design_config.fontPairId}
-            readOnly
-            className="h-full w-full"
-          />
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <h1
-            className="font-display font-semibold text-[var(--color-text-primary)]"
-            style={{ fontSize: "clamp(1.75rem, 1.3rem + 1.5vw, 2.75rem)" }}
+        <>
+          <div
+            role="img"
+            aria-label={`Invitation design for ${event.title}`}
+            className="mx-auto flex w-full overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)] shadow-lg"
+            style={{
+              // Fills the page's own fluid column rather than being pinned to a
+              // fixed 28rem, which left a card designed at 1000px rendering
+              // noticeably small on a desktop viewport.
+              aspectRatio: `${event.design_config.canvasWidth} / ${event.design_config.canvasHeight}`,
+            }}
           >
-            {event.title}
-          </h1>
-          {event.host_name && (
-            <p className="text-base text-[var(--color-text-muted)]">Hosted by {event.host_name}</p>
-          )}
-          {event.description && <p className="text-base text-[var(--color-text-primary)]">{event.description}</p>}
-          {event.event_date && (
-            <p className="text-base text-[var(--color-text-muted)]">{new Date(event.event_date).toLocaleString()}</p>
-          )}
-          {event.location && <p className="text-base text-[var(--color-text-muted)]">{event.location}</p>}
-        </div>
+            {/* Read-only: same fabric.Canvas + same canvasJSON as the editor,
+                interaction disabled -- guarantees the guest sees pixel-identical
+                content to what the sender designed, never a re-derived render. */}
+            <FabricCanvas
+              canvasWidth={event.design_config.canvasWidth}
+              canvasHeight={event.design_config.canvasHeight}
+              initialJSON={event.design_config.canvasJSON}
+              backgroundColor={event.design_config.colors?.background ?? DEFAULT_DESIGN_COLORS.background}
+              fontPairId={event.design_config.fontPairId}
+              readOnly
+              className="h-full w-full"
+            />
+          </div>
+          <EventDetails event={event} />
+        </>
+      ) : (
+        <EventDetails event={event} />
       )}
 
       {event.kind === "custom_card" && event.card_image_url && (
