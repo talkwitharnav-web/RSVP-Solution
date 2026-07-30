@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { SettingsToggles } from "@/components/ui/SettingsToggles";
 import { HealthPin } from "@/components/ui/HealthPin";
@@ -12,26 +11,17 @@ import { HealthPin } from "@/components/ui/HealthPin";
  * each page used to mount its own SettingsToggles individually. Health
  * detail varies by context: the admin DB page gets the full technical
  * popover (pool stats, live listener count, disk size), the admin gateway
- * shows it only once logged in, the sender-facing pages get the trimmed
+ * and sender-facing pages get the trimmed
  * "basic" popover, and guests get no health pin at all -- server latency is
  * the host's problem, not something a guest opening an invitation can act
  * on or should be shown.
  */
 export function GlobalSettingsToggles() {
   const pathname = usePathname();
-  const [hasAdminSession, setHasAdminSession] = useState(false);
 
   const isAdminGateway = pathname === "/";
   const isAdminDb = pathname?.startsWith("/admin/db") ?? false;
   const isReceiver = pathname?.startsWith("/receiver/") ?? false;
-
-  useEffect(() => {
-    if (!isAdminGateway) return;
-    fetch("/api/session")
-      .then((res) => res.json())
-      .then((session) => setHasAdminSession(!!session.admin))
-      .catch(() => {});
-  }, [isAdminGateway]);
 
   let health: React.ReactNode;
   if (isReceiver) {
@@ -40,7 +30,7 @@ export function GlobalSettingsToggles() {
   } else if (isAdminDb) {
     health = <HealthPin showDbSize detailLevel="full" />;
   } else if (isAdminGateway) {
-    health = hasAdminSession ? <HealthPin /> : undefined;
+    health = <HealthPin />;
   } else {
     health = <HealthPin />;
   }

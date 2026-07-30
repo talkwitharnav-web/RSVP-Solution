@@ -6,6 +6,8 @@ import { requireSender } from "@/lib/auth";
 import { isAcceptedImageDataUrl, isAcceptedImageDataUrlSize } from "@/lib/image-upload";
 import { sanitizeDesignConfig } from "@/lib/design-types";
 import { DESIGN_FONT_PAIRS } from "@/lib/design-fonts";
+import { EventQuotaError, assertSenderEventQuota, lockSenderEventQuota } from "@/lib/event-quota";
+import { rateLimitByIdentifier } from "@/lib/rate-limit";
 import {
   bodyTooLarge,
   boundedText,
@@ -23,6 +25,9 @@ const VALID_KINDS = ["external_link", "custom_card", "designed_template"];
 export async function POST(req: NextRequest) {
   const auth = await requireSender();
   if (!auth.ok) return auth.response;
+
+  const limited = rateLimitByIdentifier("event-create", auth.userId, 20, 60 * 60 * 1000);
+  if (limited) return limited;
 
   if (bodyTooLarge(req, MEDIA_BODY_LIMIT)) {
     return NextResponse.json({ error: "Request body too large" }, { status: 413 });
@@ -102,32 +107,53 @@ export async function POST(req: NextRequest) {
     auth.userId,
   ];
 
-  // Slugs are random, so a collision against the UNIQUE constraint is
-  // vanishingly unlikely -- but "vanishingly unlikely" used to surface as an
-  // unhandled 500 rather than a retry. Try a few fresh slugs before giving up.
+  // Serialize quota-affecting writes per sender. The assertion runs after
+  // the proposed insert and rolls the whole transaction back if either the
+  // event-count or stored-byte ceiling would be crossed.
   let slug: string | null = null;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const candidate = generateSlug();
-    try {
-      const result = await pool.query(
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await lockSenderEventQuota(client, auth.userId);
+
+    // Slugs are random, so a collision is vanishingly unlikely. ON CONFLICT
+    // avoids aborting the transaction, allowing a clean retry under the same
+    // quota lock.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const candidate = generateSlug();
+      const result = await client.query(
         `INSERT INTO events (slug, kind, title, host_name, description, event_date, location, external_url, questions, card_image_url, design_config, created_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         ON CONFLICT (slug) DO NOTHING
          RETURNING slug`,
         [candidate, ...insertValues],
       );
-      slug = result.rows[0].slug;
-      break;
-    } catch (err) {
-      const isSlugCollision =
-        err instanceof Error && "code" in err && (err as { code?: string }).code === "23505";
-      if (!isSlugCollision) throw err;
+      if (result.rows[0]?.slug) {
+        slug = result.rows[0].slug;
+        break;
+      }
     }
+
+    if (!slug) {
+      await client.query("ROLLBACK");
+      return NextResponse.json({ error: "Could not generate a unique link. Please try again." }, { status: 500 });
+    }
+
+    await assertSenderEventQuota(client, auth.userId);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof EventQuotaError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.reason === "storage" ? 413 : 409 },
+      );
+    }
+    throw error;
+  } finally {
+    client.release();
   }
 
-  if (!slug) {
-    return NextResponse.json({ error: "Could not generate a unique link. Please try again." }, { status: 500 });
-  }
-
-  broadcastDbChanged("events");
+  broadcastDbChanged("events", slug);
   return NextResponse.json({ slug }, { status: 201 });
 }

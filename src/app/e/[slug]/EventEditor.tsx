@@ -64,6 +64,7 @@ export default function EventEditor({ initialEvent }: { initialEvent: EventRecor
   // published elsewhere.
   useEffect(() => {
     if (!dbChanged || dbChanged.kind !== "events") return;
+    if (dbChanged.slug && dbChanged.slug !== event.slug) return;
     fetch(`/api/events/${event.slug}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((fresh: EventRecord | null) => {

@@ -6,7 +6,9 @@ import {
   SESSION_COOKIE_MAX_AGE_REMEMBERED,
   SESSION_COOKIE_MAX_AGE_DEFAULT,
   SESSION_COOKIE_SECURE,
+  SESSION_TOKEN_MAX_AGE,
 } from "@/lib/session";
+import { createAuthSession } from "@/lib/auth-session-store";
 import { rateLimit } from "@/lib/rate-limit";
 import { bodyTooLarge, SMALL_BODY_LIMIT } from "@/lib/validation";
 
@@ -65,7 +67,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
 
-  const token = createSessionToken({ type: "admin" });
+  const sessionId = await createAuthSession("admin", null, SESSION_TOKEN_MAX_AGE);
+  const token = createSessionToken({ type: "admin", sessionId });
   const response = NextResponse.json({ message: "Login successful" });
   response.cookies.set(ADMIN_SESSION_COOKIE_NAME, token, {
     httpOnly: true,

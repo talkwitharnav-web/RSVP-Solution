@@ -4,10 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { useDropdownReveal } from "@/lib/useDropdownReveal";
 import type { HealthTier } from "@/app/api/health/route";
 
-// sizeBytes/imageStorageBytes/pool/ws are only returned to localhost callers
-// -- /api/health is unauthenticated (the pill renders on public pages) and
-// the app binds to the LAN, so those internals are withheld off-machine.
-type HealthResponse = {
+type PublicHealthResponse = { status: "ok" };
+
+type DetailedHealthResponse = {
   tier: HealthTier;
   db: {
     connected: boolean;
@@ -18,6 +17,8 @@ type HealthResponse = {
   };
   ws?: { connectedClients: number | null };
 };
+
+type HealthResponse = PublicHealthResponse | DetailedHealthResponse;
 
 // K/M/G/T, not KB/MB/GB/TB. Binary (1024-based) units, since that's what
 // Postgres's own pg_database_size() and every disk-usage tool actually
@@ -159,11 +160,14 @@ export function HealthPin({
     };
   }, [isActive]);
 
+  const serverTier = health && "tier" in health ? health.tier : "healthy";
   const tier: HealthTier = failed
     ? "terrible"
     : health && clientLatencyMs !== null
-      ? worseTier(health.tier, clientTierFromLatency(clientLatencyMs))
-      : (health?.tier ?? "ok");
+      ? worseTier(serverTier, clientTierFromLatency(clientLatencyMs))
+      : health
+        ? serverTier
+        : "ok";
   const config = TIER_CONFIG[tier];
 
   return (
@@ -185,7 +189,7 @@ export function HealthPin({
     >
       <span className={`w-2 h-2 rounded-full shrink-0 animate-health-pulse ${config.dot}`} />
       <span className={`${config.text} whitespace-nowrap`}>{config.label}</span>
-      {showDbSize && health?.db.sizeBytes != null && (
+      {showDbSize && health && "db" in health && health.db.sizeBytes != null && (
         <span className="text-[var(--color-text-muted)] whitespace-nowrap">· {formatBytes(health.db.sizeBytes)}</span>
       )}
 
@@ -201,39 +205,48 @@ export function HealthPin({
                   {clientLatencyMs !== null ? `${clientLatencyMs}ms` : "—"}
                 </dd>
               </div>
-              <div className="flex justify-between gap-3">
-                <dt className="text-[var(--color-text-muted)]">Database</dt>
-                <dd className="text-[var(--color-text-primary)] font-medium">
-                  {health.db.connected ? `${health.db.latencyMs}ms` : "disconnected"}
-                </dd>
-              </div>
-              {showDbSize && health.db.sizeBytes != null && (
+              {"db" in health ? (
+                <>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-[var(--color-text-muted)]">Database</dt>
+                    <dd className="text-[var(--color-text-primary)] font-medium">
+                      {health.db.connected ? `${health.db.latencyMs}ms` : "disconnected"}
+                    </dd>
+                  </div>
+                  {showDbSize && health.db.sizeBytes != null && (
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-[var(--color-text-muted)]">DB size</dt>
+                      <dd className="text-[var(--color-text-primary)] font-medium">{formatBytes(health.db.sizeBytes)}</dd>
+                    </div>
+                  )}
+                  {showDbSize && health.db.imageStorageBytes != null && (
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-[var(--color-text-muted)]">Image storage</dt>
+                      <dd className="text-[var(--color-text-primary)] font-medium">
+                        {formatBytes(health.db.imageStorageBytes)}
+                      </dd>
+                    </div>
+                  )}
+                  {detailLevel === "full" && health.db.pool && (
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-[var(--color-text-muted)]">DB pool</dt>
+                      <dd className="text-[var(--color-text-primary)] font-medium">
+                        {health.db.pool.idle}/{health.db.pool.total} idle
+                        {health.db.pool.waiting > 0 ? `, ${health.db.pool.waiting} waiting` : ""}
+                      </dd>
+                    </div>
+                  )}
+                  {detailLevel === "full" && health.ws?.connectedClients != null && (
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-[var(--color-text-muted)]">Live listeners</dt>
+                      <dd className="text-[var(--color-text-primary)] font-medium">{health.ws.connectedClients}</dd>
+                    </div>
+                  )}
+                </>
+              ) : (
                 <div className="flex justify-between gap-3">
-                  <dt className="text-[var(--color-text-muted)]">DB size</dt>
-                  <dd className="text-[var(--color-text-primary)] font-medium">{formatBytes(health.db.sizeBytes)}</dd>
-                </div>
-              )}
-              {showDbSize && health.db.imageStorageBytes != null && (
-                <div className="flex justify-between gap-3">
-                  <dt className="text-[var(--color-text-muted)]">Image storage</dt>
-                  <dd className="text-[var(--color-text-primary)] font-medium">
-                    {formatBytes(health.db.imageStorageBytes)}
-                  </dd>
-                </div>
-              )}
-              {detailLevel === "full" && health.db.pool && (
-                <div className="flex justify-between gap-3">
-                  <dt className="text-[var(--color-text-muted)]">DB pool</dt>
-                  <dd className="text-[var(--color-text-primary)] font-medium">
-                    {health.db.pool.idle}/{health.db.pool.total} idle
-                    {health.db.pool.waiting > 0 ? `, ${health.db.pool.waiting} waiting` : ""}
-                  </dd>
-                </div>
-              )}
-              {detailLevel === "full" && health.ws?.connectedClients != null && (
-                <div className="flex justify-between gap-3">
-                  <dt className="text-[var(--color-text-muted)]">Live listeners</dt>
-                  <dd className="text-[var(--color-text-primary)] font-medium">{health.ws.connectedClients}</dd>
+                  <dt className="text-[var(--color-text-muted)]">Server</dt>
+                  <dd className="text-[var(--color-text-primary)] font-medium">reachable</dd>
                 </div>
               )}
             </dl>

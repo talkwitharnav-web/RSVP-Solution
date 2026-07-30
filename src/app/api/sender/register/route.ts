@@ -8,7 +8,9 @@ import {
   SESSION_COOKIE_MAX_AGE_REMEMBERED,
   SESSION_COOKIE_MAX_AGE_DEFAULT,
   SESSION_COOKIE_SECURE,
+  SESSION_TOKEN_MAX_AGE,
 } from "@/lib/session";
+import { createAuthSession } from "@/lib/auth-session-store";
 import { rateLimit } from "@/lib/rate-limit";
 import {
   bodyTooLarge,
@@ -83,7 +85,8 @@ export async function POST(req: Request) {
 
   broadcastDbChanged("users");
 
-  const token = createSessionToken({ type: "sender", userId, username });
+  const sessionId = await createAuthSession("sender", userId, SESSION_TOKEN_MAX_AGE);
+  const token = createSessionToken({ type: "sender", sessionId, userId, username });
   const response = NextResponse.json({ message: "Account created" }, { status: 201 });
   response.cookies.set(SENDER_SESSION_COOKIE_NAME, token, {
     httpOnly: true,

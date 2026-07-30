@@ -27,7 +27,7 @@ import { StrengthMeter } from "@/components/ui/StrengthMeter";
 import { scorePasswordStrength } from "@/lib/credential-strength";
 import { useWebSocket } from "@/lib/useWebSocket";
 import { useOptimisticActions, reinsertAt } from "@/lib/optimistic";
-import type { UserRecord, EventRecord, EventKind } from "@/lib/types";
+import type { AdminEventSummary, UserRecord, EventKind } from "@/lib/types";
 
 // Single source of truth for RSVP kind display labels -- shared by the badge
 // and the filter dropdown so they can never drift apart (previously the
@@ -161,11 +161,21 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return json;
 }
 
+type AdminDbResponse = {
+  users: UserRecord[];
+  events: AdminEventSummary[];
+  nextUserOffset: number | null;
+  nextEventOffset: number | null;
+};
+
 function AdminDbContent() {
   const router = useRouter();
   const showToast = useToast();
   const [users, setUsers] = useState<UserRecord[]>([]);
-  const [events, setEvents] = useState<EventRecord[]>([]);
+  const [events, setEvents] = useState<AdminEventSummary[]>([]);
+  const [nextUserOffset, setNextUserOffset] = useState<number | null>(null);
+  const [nextEventOffset, setNextEventOffset] = useState<number | null>(null);
+  const [loadingMoreTable, setLoadingMoreTable] = useState<"users" | "events" | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
@@ -190,10 +200,39 @@ function AdminDbContent() {
   const missedRefreshRef = useRef(false);
 
   const reload = useCallback(async () => {
-    const data = await fetchJson<{ users: UserRecord[]; events: EventRecord[] }>("/api/dev/db");
+    const data = await fetchJson<AdminDbResponse>("/api/dev/db");
     setUsers(data.users);
     setEvents(data.events);
+    setNextUserOffset(data.nextUserOffset);
+    setNextEventOffset(data.nextEventOffset);
   }, []);
+
+  const loadMore = async (table: "users" | "events") => {
+    const offset = table === "users" ? nextUserOffset : nextEventOffset;
+    if (offset === null || loadingMoreTable) return;
+    setLoadingMoreTable(table);
+    try {
+      const offsetKey = table === "users" ? "userOffset" : "eventOffset";
+      const data = await fetchJson<AdminDbResponse>(`/api/dev/db?table=${table}&${offsetKey}=${offset}`);
+      if (table === "users") {
+        setUsers((previous) => {
+          const ids = new Set(previous.map((user) => user.id));
+          return [...previous, ...data.users.filter((user) => !ids.has(user.id))];
+        });
+        setNextUserOffset(data.nextUserOffset);
+      } else {
+        setEvents((previous) => {
+          const ids = new Set(previous.map((event) => event.id));
+          return [...previous, ...data.events.filter((event) => !ids.has(event.id))];
+        });
+        setNextEventOffset(data.nextEventOffset);
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Couldn't load more rows", "error");
+    } finally {
+      setLoadingMoreTable(null);
+    }
+  };
 
   useEffect(() => {
     fetchJson<{ authenticated: boolean; admin: boolean }>("/api/session")
@@ -743,6 +782,16 @@ function AdminDbContent() {
                 </tbody>
               </table>
             </Card>
+            {nextUserOffset !== null && (
+              <Button
+                variant="secondary"
+                className="mt-3"
+                disabled={loadingMoreTable !== null}
+                onClick={() => void loadMore("users")}
+              >
+                {loadingMoreTable === "users" ? "Loading..." : "Load more users"}
+              </Button>
+            )}
           </section>
 
           <section>
@@ -859,6 +908,16 @@ function AdminDbContent() {
                 </table>
               </div>
             </Card>
+            {nextEventOffset !== null && (
+              <Button
+                variant="secondary"
+                className="mt-3"
+                disabled={loadingMoreTable !== null}
+                onClick={() => void loadMore("events")}
+              >
+                {loadingMoreTable === "events" ? "Loading..." : "Load more RSVP links"}
+              </Button>
+            )}
           </section>
         </div>
       </div>

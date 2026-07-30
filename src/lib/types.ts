@@ -28,6 +28,13 @@ export interface EventRecord {
   created_at: string;
 }
 
+export type SenderEventSummary = Pick<
+  EventRecord,
+  "id" | "slug" | "kind" | "title" | "card_image_url" | "guest_categories" | "published"
+>;
+
+export type AdminEventSummary = Pick<EventRecord, "id" | "slug" | "kind" | "title" | "created_at">;
+
 export interface RsvpRecord {
   id: string;
   event_id: string;

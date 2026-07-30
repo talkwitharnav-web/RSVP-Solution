@@ -433,7 +433,7 @@ security posture already matched Next's own stated reasoning for the
 rename — the proxy layer here only does an IP check, never session/auth
 verification, which stays in route handlers as it always did.
 
-## 10. Known limitation — feels bare-bones, needs occasion presets (flagged 2026-07-27, not yet actioned)
+## 10. Historical limitation — occasion presets (flagged 2026-07-27, actioned 2026-07-28)
 
 User feedback right after the build landed: **"our editor is highly bare
 bones, i have no idea why it is the way it is but it lacks so much detail
@@ -472,5 +472,36 @@ pieces yourself). Would need more raw material too: more than 3 layout
 templates and more than 4 palette/font options for presets to feel
 genuinely differentiated rather than the same handful of parts relabeled.
 
-Not scoped or started. Revisit this section before the next pass on the
-designer.
+This limitation was superseded by the Fabric.js rebuild and five occasion
+templates described below. The old bundle shape here is retained as historical
+reasoning, not current architecture.
+
+## 11. Current Fabric editor and scene security (2026-07-28/29)
+
+The template-constrained `react-rnd` implementation above was replaced by a
+real Fabric.js v7 canvas. Current editor: five occasion templates, 30 font
+pairs, open five-role colours + eight quick picks, 27 icons, four decorations,
+images, layers, undo/redo, copy/paste, whole-object and per-character type
+styling, snapping/equal spacing/rotation snap, zoom/pan, and one shared
+interactive/read-only `FabricCanvas` renderer. `/create/design/[slug]` is the
+permanent edit link.
+
+`design_config.canvasJSON` is still Fabric's scene format, but it is **not
+trusted or passed through raw**. `sanitizeDesignConfig()` checks the 8 MiB
+UTF-8 ceiling and calls `sanitizeCanvasJSON()`, which rebuilds a new scene from
+an allowlist:
+
+- supported object classes/fields only; bounded top-level/total objects and one
+  group level;
+- bounded text, style ranges, paths, points, dimensions, scales and metadata;
+- image `src` must be an accepted, size-bounded PNG/JPEG/WebP/GIF/AVIF data URL;
+- remote URLs, filters, clip paths, shadows, patterns, nested groups, unknown
+  classes and unknown properties are removed;
+- malformed or oversized designs fall back safely without making palette/font/
+  canvas mandatory — title remains the only creation requirement.
+
+Verified against deliberately hostile API input (remote images, filters,
+clip paths, unknown fields and nested image groups were removed) and a valid
+Textbox/Group/Image scene loaded back through Fabric. Public guest/API event
+payloads also use an explicit field projection and never include DB owner/id/
+created-at metadata.

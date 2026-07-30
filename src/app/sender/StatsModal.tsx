@@ -10,7 +10,7 @@ import { useWebSocket } from "@/lib/useWebSocket";
 import { useOptimisticActions, reinsertAt } from "@/lib/optimistic";
 import { categoryLabelForCount } from "@/lib/guest-categories";
 import { ThemedTooltip } from "@/components/ui/ThemedTooltip";
-import type { EventRecord, RsvpRecord } from "@/lib/types";
+import type { RsvpRecord, SenderEventSummary } from "@/lib/types";
 
 /**
  * Categorical palette for the guest-category pie, validated with
@@ -135,7 +135,7 @@ function PieSegmentTooltip({
   );
 }
 
-export function StatsModal({ event, isOpen, onClose }: { event: EventRecord; isOpen: boolean; onClose: () => void }) {
+export function StatsModal({ event, isOpen, onClose }: { event: SenderEventSummary; isOpen: boolean; onClose: () => void }) {
   const { shouldRender } = useDropdownReveal(isOpen);
   const [data, setData] = useState<StatsData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -177,6 +177,7 @@ export function StatsModal({ event, isOpen, onClose }: { event: EventRecord; isO
   // reopen.
   useEffect(() => {
     if (!isOpen || !dbChanged || dbChanged.kind !== "events") return;
+    if (dbChanged.slug && dbChanged.slug !== event.slug) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbChanged, isOpen]);

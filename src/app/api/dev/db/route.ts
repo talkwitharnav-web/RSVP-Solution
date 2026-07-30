@@ -4,23 +4,56 @@ import { initDb, pool } from "@/lib/db";
 import { generateSlug } from "@/lib/slug";
 import { requireAdmin } from "@/lib/auth";
 import { broadcastDbChanged } from "@/lib/ws-broadcast";
+import type { AdminEventSummary } from "@/lib/types";
 
 const SALT_ROUNDS = 10;
+const ADMIN_PAGE_SIZE = 100;
 
-export async function GET() {
+function safeOffset(value: string | null): number {
+  const offset = Number(value);
+  return Number.isSafeInteger(offset) && offset > 0 ? Math.min(offset, 10000) : 0;
+}
+
+export async function GET(req: NextRequest) {
   const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
 
   await initDb();
+  const table = req.nextUrl.searchParams.get("table");
+  const includeUsers = table !== "events";
+  const includeEvents = table !== "users";
+  const userOffset = safeOffset(req.nextUrl.searchParams.get("userOffset"));
+  const eventOffset = safeOffset(req.nextUrl.searchParams.get("eventOffset"));
 
   const [usersResult, eventsResult] = await Promise.all([
-    pool.query(`SELECT * FROM users ORDER BY created_at DESC`),
-    pool.query(`SELECT * FROM events ORDER BY created_at DESC`),
+    includeUsers
+      ? pool.query(
+          `SELECT * FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+          [ADMIN_PAGE_SIZE + 1, userOffset],
+        )
+      : Promise.resolve({ rows: [] }),
+    includeEvents
+      ? pool.query<AdminEventSummary>(
+          `SELECT id, slug, kind, title, created_at
+           FROM events
+           ORDER BY created_at DESC
+           LIMIT $1 OFFSET $2`,
+          [ADMIN_PAGE_SIZE + 1, eventOffset],
+        )
+      : Promise.resolve({ rows: [] as AdminEventSummary[] }),
   ]);
+  const users = usersResult.rows.slice(0, ADMIN_PAGE_SIZE);
+  const events = eventsResult.rows.slice(0, ADMIN_PAGE_SIZE);
 
   return NextResponse.json({
-    users: usersResult.rows,
-    events: eventsResult.rows,
+    users,
+    events,
+    nextUserOffset: includeUsers && usersResult.rows.length > ADMIN_PAGE_SIZE
+      ? userOffset + users.length
+      : null,
+    nextEventOffset: includeEvents && eventsResult.rows.length > ADMIN_PAGE_SIZE
+      ? eventOffset + events.length
+      : null,
   });
 }
 

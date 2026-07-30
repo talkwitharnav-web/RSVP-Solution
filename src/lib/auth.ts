@@ -7,6 +7,7 @@ import {
 } from "./session";
 import { isLocalhostIp, clientIpFromHeaders } from "./network";
 import { initDb, pool } from "./db";
+import { isAuthSessionActive } from "./auth-session-store";
 
 /**
  * Verified admin session, or a 401 response to return as-is from the route
@@ -27,8 +28,12 @@ export async function requireAdmin(): Promise<{ ok: true } | { ok: false; respon
 
   const cookieStore = await cookies();
   const payload = verifySessionToken(cookieStore.get(ADMIN_SESSION_COOKIE_NAME)?.value);
-  if (payload?.type === "admin") return { ok: true };
-  return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  if (payload?.type === "admin" && await isAuthSessionActive(payload.sessionId, "admin", null)) {
+    return { ok: true };
+  }
+  const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  response.cookies.set(ADMIN_SESSION_COOKIE_NAME, "", { maxAge: 0, path: "/" });
+  return { ok: false, response };
 }
 
 /**
@@ -61,7 +66,9 @@ export async function requireSender(): Promise<
   const cookieStore = await cookies();
   const payload = verifySessionToken(cookieStore.get(SENDER_SESSION_COOKIE_NAME)?.value);
   if (payload?.type !== "sender") {
-    return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    response.cookies.set(SENDER_SESSION_COOKIE_NAME, "", { maxAge: 0, path: "/" });
+    return { ok: false, response };
   }
 
   await initDb();
@@ -73,6 +80,13 @@ export async function requireSender(): Promise<
     // (e.g. a bookmarked API call) doesn't keep re-arriving with a cookie
     // that will only ever fail this same check.
     const response = NextResponse.json({ error: "This account no longer exists" }, { status: 401 });
+    response.cookies.set(SENDER_SESSION_COOKIE_NAME, "", { maxAge: 0, path: "/" });
+    return { ok: false, response };
+  }
+
+  const sessionActive = await isAuthSessionActive(payload.sessionId, "sender", payload.userId);
+  if (!sessionActive) {
+    const response = NextResponse.json({ error: "Your session has expired or was revoked" }, { status: 401 });
     response.cookies.set(SENDER_SESSION_COOKIE_NAME, "", { maxAge: 0, path: "/" });
     return { ok: false, response };
   }

@@ -7,7 +7,7 @@ import { useToast } from "@/components/ui/Toast";
 
 /**
  * Mounted once in the root layout (alongside GlobalSettingsToggles) so it
- * can catch a `user-deleted` broadcast from any page a logged-in sender
+ * can catch a session-state broadcast from any page a logged-in sender
  * might be sitting on -- not just /sender.
  *
  * Without this, `requireSender()` only ever checks that the session cookie
@@ -22,21 +22,24 @@ import { useToast } from "@/components/ui/Toast";
  * account's own tab(s) get a real, immediate, explained logout instead of
  * slowly rotting until some deep-enough query finally surfaces an error.
  *
- * `broadcastUserDeleted` (src/lib/ws-broadcast.ts) carries the deleted
- * user's id specifically so this can cheaply compare against its own
- * session and only act when it's actually the affected account -- every
- * other sender's tab ignores a broadcast naming someone else's id.
+ * Broadcasts deliberately carry no user id. Every connected sender checks
+ * its own no-store session endpoint, and only the browser whose persisted
+ * session was actually revoked acts. Raw WebSocket listeners therefore
+ * cannot collect account identifiers from administrative changes.
  */
 export function SessionWatcher() {
   const router = useRouter();
   const showToast = useToast();
   const [senderUserId, setSenderUserId] = useState<string | null>(null);
   const { messagesByType } = useWebSocket();
-  const userDeleted = messagesByType["user-deleted"] as { userId?: string } | undefined;
+  const sessionStateChanged = messagesByType["session-state-changed"] as
+    | { reason?: "account-deleted" | "password-reset" }
+    | undefined;
   // Re-entrancy guard for the effect below, not render-relevant state -- a
   // ref so setting it doesn't itself trigger a re-render/lint warning about
   // synchronous setState in an effect.
   const handledRef = useRef(false);
+  const checkingRef = useRef(false);
 
   useEffect(() => {
     fetch("/api/session")
@@ -46,26 +49,30 @@ export function SessionWatcher() {
   }, []);
 
   useEffect(() => {
-    if (!senderUserId || !userDeleted || userDeleted.userId !== senderUserId || handledRef.current) return;
-    handledRef.current = true;
+    if (!senderUserId || !sessionStateChanged || handledRef.current || checkingRef.current) return;
+    checkingRef.current = true;
 
-    fetch("/api/logout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "sender" }),
-    })
+    fetch("/api/session")
+      .then((response) => response.json())
+      .then((session) => {
+        if (session.sender?.userId === senderUserId) return;
+        handledRef.current = true;
+        showToast(
+          sessionStateChanged.reason === "account-deleted"
+            ? "Your account was removed by an admin — you've been logged out."
+            : "Your password was changed — sign in again to continue.",
+          "warning",
+        );
+        router.replace("/sender/landing");
+      })
       .catch(() => {
-        // The cookie clear is best-effort here -- the redirect below sends
-        // the sender to a logged-out-looking page regardless, and any stale
-        // cookie left behind fails ownership checks server-side anyway
-        // (the user row is genuinely gone), it just wouldn't look logged-
-        // out client-side.
+        // The unconditional server-side session check remains the backstop;
+        // retry on the next session-state broadcast or protected request.
       })
       .finally(() => {
-        showToast("Your account was removed by an admin — you've been logged out.", "warning");
-        router.replace("/sender/landing");
+        checkingRef.current = false;
       });
-  }, [userDeleted, senderUserId, router, showToast]);
+  }, [sessionStateChanged, senderUserId, router, showToast]);
 
   return null;
 }

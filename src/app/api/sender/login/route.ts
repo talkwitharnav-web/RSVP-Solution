@@ -7,7 +7,9 @@ import {
   SESSION_COOKIE_MAX_AGE_REMEMBERED,
   SESSION_COOKIE_MAX_AGE_DEFAULT,
   SESSION_COOKIE_SECURE,
+  SESSION_TOKEN_MAX_AGE,
 } from "@/lib/session";
+import { createAuthSession } from "@/lib/auth-session-store";
 import { rateLimit } from "@/lib/rate-limit";
 import { bodyTooLarge, boundedText, SMALL_BODY_LIMIT, MAX_USERNAME_LENGTH } from "@/lib/validation";
 import type { UserRecord } from "@/lib/types";
@@ -15,7 +17,7 @@ import type { UserRecord } from "@/lib/types";
 // Fixed bcrypt hash of an arbitrary string, compared against on every login
 // attempt for a username that doesn't exist — keeps "no such user" and
 // "wrong password" taking the same wall-clock time.
-const DUMMY_PASSWORD_HASH = "$2a$10$CwTycUXWue0Thq9StjUM0uJ8G8Y5v6f6b5b0b5b0b5b0b5b0b5b0b5";
+const DUMMY_PASSWORD_HASH = "$2b$10$qZdP0Cx2FBKOZ7WCJkmMuujpNg/PpCOe9fxOeLeKxus4Iar6rhObC";
 
 export async function POST(req: Request) {
   // Credential-stuffing/brute-force protection, same rationale as admin
@@ -52,7 +54,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid username or password" }, { status: 401 });
   }
 
-  const token = createSessionToken({ type: "sender", userId: user.id, username: user.username });
+  const sessionId = await createAuthSession("sender", user.id, SESSION_TOKEN_MAX_AGE);
+  const token = createSessionToken({
+    type: "sender",
+    sessionId,
+    userId: user.id,
+    username: user.username,
+  });
   const response = NextResponse.json({ message: "Login successful" });
   response.cookies.set(SENDER_SESSION_COOKIE_NAME, token, {
     httpOnly: true,

@@ -1,39 +1,24 @@
 import { createHmac, timingSafeEqual } from "crypto";
 
-/**
- * Dev-only fallback secret, same pattern as the reference project's own
- * session.ts, so the app works locally without requiring SESSION_SECRET to
- * be set. A production build refuses to start without a real one -- the
- * fallback is committed to source control, so anyone who has seen this repo
- * could otherwise forge admin/sender session cookies at will.
- */
-if (!process.env.SESSION_SECRET) {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error(
-      "SESSION_SECRET must be set in production. The dev fallback secret is public " +
-      "(it is committed to this repository), so anyone could forge admin and sender sessions.",
-    );
-  }
-  console.warn(
-    "\n*** WARNING: SESSION_SECRET is not set. Falling back to a hardcoded, " +
-    "publicly-known dev secret — anyone who has seen this source can forge " +
-    "admin/sender sessions. Set SESSION_SECRET in .env.local before any " +
-    "non-local use. ***\n",
-  );
+const SECRET = process.env.SESSION_SECRET || "";
+if (Buffer.byteLength(SECRET) < 32) {
+  throw new Error("SESSION_SECRET must be configured with at least 32 bytes.");
 }
 
-const SECRET = process.env.SESSION_SECRET || "dev-only-insecure-session-secret";
-
 export type SessionPayload =
-  | { type: "admin"; exp: number }
-  | { type: "sender"; userId: string; username: string; exp: number };
+  | { type: "admin"; sessionId: string; exp: number }
+  | { type: "sender"; sessionId: string; userId: string; username: string; exp: number };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function sign(data: string): string {
   return createHmac("sha256", SECRET).update(data).digest("base64url");
 }
 
 export function createSessionToken(
-  payload: { type: "admin" } | { type: "sender"; userId: string; username: string },
+  payload:
+    | { type: "admin"; sessionId: string }
+    | { type: "sender"; sessionId: string; userId: string; username: string },
 ): string {
   const full: SessionPayload = {
     ...payload,
@@ -77,6 +62,7 @@ function isSessionPayload(value: unknown): value is SessionPayload {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
   if (typeof v.exp !== "number" || !Number.isFinite(v.exp)) return false;
+  if (typeof v.sessionId !== "string" || !UUID_RE.test(v.sessionId)) return false;
   if (v.type === "admin") return true;
   return v.type === "sender" && typeof v.userId === "string" && typeof v.username === "string";
 }

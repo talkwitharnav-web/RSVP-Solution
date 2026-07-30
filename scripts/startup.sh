@@ -136,6 +136,10 @@ if [ ! -f "$REPO_ROOT/.env.local" ]; then
 else
     ok ".env.local already exists."
 fi
+if ! node "$SCRIPT_DIR/ensure-session-secret.mjs" "$REPO_ROOT/.env.local"; then
+    err "Could not configure SESSION_SECRET in .env.local."
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # 6. npm dependencies

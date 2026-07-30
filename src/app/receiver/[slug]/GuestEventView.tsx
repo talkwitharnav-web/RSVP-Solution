@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useWebSocket } from "@/lib/useWebSocket";
-import type { EventRecord } from "@/lib/types";
+import type { PublicEventRecord } from "@/lib/public-event";
 import { DEFAULT_DESIGN_COLORS } from "@/lib/design-types";
 import { FabricCanvas } from "@/components/design/FabricCanvas";
 import RsvpForm from "./RsvpForm";
@@ -28,13 +28,14 @@ function isSafeExternalUrl(url: string | null): url is string {
  * open while the host is editing it (see EventEditor) sees the update
  * within about a second instead of needing a manual refresh.
  */
-export default function GuestEventView({ initialEvent }: { initialEvent: EventRecord }) {
+export default function GuestEventView({ initialEvent }: { initialEvent: PublicEventRecord }) {
   const [event, setEvent] = useState(initialEvent);
   const { messagesByType } = useWebSocket();
   const dbChanged = messagesByType["db-changed"];
 
   useEffect(() => {
     if (!dbChanged || dbChanged.kind !== "events") return;
+    if (dbChanged.slug && dbChanged.slug !== initialEvent.slug) return;
     fetch(`/api/events/${initialEvent.slug}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((updated) => {

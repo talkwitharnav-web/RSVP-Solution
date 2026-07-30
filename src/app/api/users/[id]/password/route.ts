@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { initDb, pool } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
-import { broadcastDbChanged } from "@/lib/ws-broadcast";
+import { broadcastDbChanged, broadcastSessionStateChanged } from "@/lib/ws-broadcast";
 import { bodyTooLarge, SMALL_BODY_LIMIT } from "@/lib/validation";
 
 const SALT_ROUNDS = 10;
@@ -44,14 +44,27 @@ export async function PUT(
   }
 
   const hashed = await bcrypt.hash(newPassword, SALT_ROUNDS);
-  const result = await pool.query(
-    `UPDATE users SET password = $1, raw_password = $2 WHERE id = $3 RETURNING id`,
-    [hashed, newPassword, id],
-  );
-  if (result.rows.length === 0) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `UPDATE users SET password = $1, raw_password = $2 WHERE id = $3 RETURNING id`,
+      [hashed, newPassword, id],
+    );
+    if (result.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+    await client.query(`DELETE FROM auth_sessions WHERE session_type = 'sender' AND user_id = $1`, [id]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
   }
 
   broadcastDbChanged("users");
+  broadcastSessionStateChanged("password-reset");
   return NextResponse.json({ message: "Password updated successfully" });
 }

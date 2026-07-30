@@ -43,6 +43,12 @@ Admin login is at `/` (localhost only). Requires `ADMIN_USERNAME`/
 `SYSTEM_MEMORY.md`'s "Auth" section for why). Credentials aren't recorded in
 the docs — ask the user directly if genuinely needed.
 
+`npm run start:all` ends in **development mode** (`npm run dev`): hot reload,
+LAN sender/receiver testing, admin localhost-only. Production is the same app
+in optimized mode (`npm run build` + `npm start`), defaults to loopback, requires
+`FORCE_SECURE_COOKIES=true`, and expects a trusted HTTPS proxy; admin is still
+available through localhost but returns 404 through LAN/public requests.
+
 Always finish with `npx tsc --noEmit` and `npx eslint .` — both currently pass
 clean with zero warnings, and the project treats that as an invariant.
 
@@ -70,21 +76,28 @@ Everything below is **done and verified against a running app**, not theoretical
   flies in from the corner and has a real fade; a `ThemedTooltip`-inside-`Modal`
   bug that inflated the modal's scrollable area on hover is fixed (see
   "Landmines" below — worth reading if touching either component again).
-- **Ghost sessions closed (2026-07-29).** A deleted sender account used to
-  keep working indefinitely on any tab that already held its cookie. Two
-  layers now: a live WS push (`SessionWatcher`, force-logs-out an open tab
-  within ~1s) plus a server-side backstop (`requireSender()` now verifies the
-  `users` row still exists, not just the cookie's signature, and clears the
-  cookie itself if not) — the backstop is what actually closes the gap
-  unconditionally, the live push is just the fast/graceful path.
+- **Sessions are revocable (2026-07-29).** Signed cookies carry an
+  `auth_sessions` UUID checked on every protected/owner-only path. Logout
+  revokes that browser; password reset revokes all sender sessions; user
+  delete cascades. `SessionWatcher` receives an identifier-free state-change
+  push and confirms its own session before redirecting. Copied-cookie replay
+  after logout was verified 401.
 - **`EventEditor`/`DesignEditor` sync live, but conservatively.** Both pick up
   a live `published` status change from elsewhere without touching any text
   field or the canvas — a deliberate choice so an in-progress edit is never
   silently overwritten by an unrelated live update.
-- **Security pass complete** (2026-07-28, see `security and bug fixes.md`).
-  Biggest fix: a SQL LIKE-wildcard weakness in login. Still holds; nothing
-  since has touched auth except the ghost-session hardening above, which is
-  additive.
+- **Full security remediation + hammer complete (2026-07-29).** Current record
+  is `security.md`; `security and bug fixes.md` is the older 2026-07-28 pass.
+  Added raw HTTP/WS guards, strict Fabric scene allowlisting, public event
+  projection, revocable sessions, proxy trust, security headers, DB isolation,
+  quotas/pagination/scoped live refresh, and patched production dependencies.
+  Hammer: 800 concurrent reads + 200 malformed requests + exact rate/WS limits,
+  then 3,600 production reads; zero request errors/crashes. One proxy WS cap bug
+  was found by the hammer and fixed/retested.
+- **Current sender limits were introduced by the security pass, not requested
+  by the user:** 50 invitations, 100 MiB serialized event storage, 20 creates/
+  hour, 120 updates/10 minutes. Gallery pagination is 12 cards/page; admin is
+  100 rows/table/page. Discuss product policy before changing or removing.
 - **Two dead routes removed (2026-07-29).** `/create/link` and
   `/create/template` are gone outright (confirmed zero references anywhere
   else first).
@@ -182,8 +195,9 @@ asset source.
   this session's own testing were deleted with the user's explicit
   confirmation; anything older hasn't been touched.
 - **`SESSION_SECRET` and admin credentials are already handled (2026-07-29).**
-  `SESSION_SECRET` is set in `.env.local` (a production build still throws if
-  it's ever unset). Admin login has **no hardcoded fallback at all** anymore
+  `SESSION_SECRET` is set in `.env.local`; startup auto-generates a private
+  48-byte value if absent/short, and any server start throws below 32 bytes.
+  Admin login has **no hardcoded fallback at all** anymore
   — `ADMIN_USERNAME`/`ADMIN_PASSWORD` must be set in `.env.local` or admin
   login returns 503. This was forced by discovering the repo is genuinely
   public, which permanently exposed the original committed pair in git
@@ -196,6 +210,10 @@ asset source.
   "Landmines" below for why they can't live in the project root at all, not
   just why they aren't committed. A real suite needs the `require()`/
   clean-eslint tension solved first.
+- **Security-test data was intentionally retained:** sender
+  `security_hammer_1785389430574` / display name "Security Hammer Test" and
+  draft "Security Hammer Draft" (`bbdjg6yj`). Offer cleanup; never delete it
+  or other rows without explicit approval.
 
 ---
 

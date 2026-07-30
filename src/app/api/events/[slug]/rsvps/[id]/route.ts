@@ -46,6 +46,6 @@ export async function DELETE(
     return NextResponse.json({ error: "RSVP not found" }, { status: 404 });
   }
 
-  broadcastDbChanged("events");
+  broadcastDbChanged("events", slug);
   return NextResponse.json({ ok: true });
 }

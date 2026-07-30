@@ -28,7 +28,16 @@ function clientIp(req: Request): string {
  * `max` attempts within `windowMs`.
  */
 export function rateLimit(req: Request, bucketName: string, max: number, windowMs: number): NextResponse | null {
-  const key = `${bucketName}:${clientIp(req)}`;
+  return rateLimitByIdentifier(bucketName, clientIp(req), max, windowMs);
+}
+
+export function rateLimitByIdentifier(
+  bucketName: string,
+  identifier: string,
+  max: number,
+  windowMs: number,
+): NextResponse | null {
+  const key = `${bucketName}:${identifier}`;
   const now = Date.now();
   sweepExpired(now);
   const existing = buckets.get(key);

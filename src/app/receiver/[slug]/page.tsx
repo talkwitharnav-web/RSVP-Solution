@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { initDb, pool } from "@/lib/db";
 import { verifySessionToken, SENDER_SESSION_COOKIE_NAME } from "@/lib/session";
+import { isAuthSessionActive } from "@/lib/auth-session-store";
+import { toPublicEventRecord } from "@/lib/public-event";
 import type { EventRecord } from "@/lib/types";
 import GuestEventView from "./GuestEventView";
 
@@ -33,9 +35,11 @@ export default async function ReceiverPage({
   if (!event.published) {
     const cookieStore = await cookies();
     const senderSession = verifySessionToken(cookieStore.get(SENDER_SESSION_COOKIE_NAME)?.value);
-    const isOwner = senderSession?.type === "sender" && senderSession.userId === event.created_by;
+    const isOwner = senderSession?.type === "sender" && senderSession.userId === event.created_by
+      ? await isAuthSessionActive(senderSession.sessionId, "sender", senderSession.userId)
+      : false;
     if (!isOwner) notFound();
   }
 
-  return <GuestEventView initialEvent={event} />;
+  return <GuestEventView initialEvent={toPublicEventRecord(event)} />;
 }

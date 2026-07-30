@@ -153,6 +153,7 @@ export default function DesignEditor({ initialEvent }: { initialEvent?: EventRec
   // sync.
   useEffect(() => {
     if (!event || !dbChanged || dbChanged.kind !== "events") return;
+    if (dbChanged.slug && dbChanged.slug !== event.slug) return;
     fetch(`/api/events/${event.slug}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((fresh: EventRecord | null) => {

@@ -101,6 +101,6 @@ export async function POST(
     [eventId, guestName, attending, guestCount, JSON.stringify(categoryCounts), JSON.stringify(answers)],
   );
 
-  broadcastDbChanged("events");
+  broadcastDbChanged("events", slug);
   return NextResponse.json({ ok: true }, { status: 201 });
 }

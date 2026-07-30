@@ -1,5 +1,10 @@
 # Security & Bug Fix Pass — 2026-07-28
 
+> Historical pass. For the broader 2026-07-29 audit, remediation status,
+> hammer results, remaining deployment controls, and current limits, read
+> `security.md`. Findings below remain useful history but are not exhaustive
+> current security documentation.
+
 Companion to the read-only card-editor audit that preceded this (that doc was
 deleted in the 2026-07-28 cleanup once every finding in it had been fixed — it
 described code that no longer exists).
@@ -53,7 +58,7 @@ error text are localhost-only, matching `HealthPin`'s existing
   login already guarded against this with a dummy-hash bcrypt compare. Now uses
   a padded `timingSafeEqual`, and both comparisons always run (no `&&`
   short-circuit). Credentials now also read from `ADMIN_USERNAME`/`ADMIN_PASSWORD`
-  env vars, falling back to the committed pair.
+  env vars and fail closed when either is unset; there is no committed fallback.
 - **`SESSION_SECRET` fell back silently.** The dev fallback is committed to the
   repo, so anyone who has seen the source could forge admin/sender cookies. A
   production build now refuses to start without a real secret; dev still warns.

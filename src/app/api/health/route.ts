@@ -24,6 +24,12 @@ export async function GET() {
   // matches HealthPin's own detailLevel="full" being an /admin/db-only prop.
   const headerList = await nextHeaders();
   const isLocal = isLocalhostIp(clientIpFromHeaders(headerList));
+  if (!isLocal) {
+    return NextResponse.json(
+      { status: "ok" },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
 
   const started = Date.now();
   let dbLatencyMs: number | null = null;
@@ -71,23 +77,20 @@ export async function GET() {
     tier = "healthy";
   }
 
-  return NextResponse.json({
-    tier,
-    db: {
-      connected: dbError === null,
-      latencyMs: dbLatencyMs,
-      // A raw Postgres error can name hosts, databases, roles, and file paths.
-      // Off-machine callers get a fixed string; the real text stays local.
-      error: dbError === null ? null : isLocal ? dbError : "Database unavailable",
-      ...(isLocal
-        ? {
-            sizeBytes: dbSizeBytes,
-            imageStorageBytes,
-            pool: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
-          }
-        : {}),
+  return NextResponse.json(
+    {
+      tier,
+      db: {
+        connected: dbError === null,
+        latencyMs: dbLatencyMs,
+        error: dbError,
+        sizeBytes: dbSizeBytes,
+        imageStorageBytes,
+        pool: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
+      },
+      ws: { connectedClients: wsClientCount },
+      checkedAt: new Date().toISOString(),
     },
-    ...(isLocal ? { ws: { connectedClients: wsClientCount } } : {}),
-    checkedAt: new Date().toISOString(),
-  });
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }

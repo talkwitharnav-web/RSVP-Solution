@@ -1,15 +1,38 @@
 # Security Risk Register
 
-Read-only security audit recorded 2026-07-29. This document describes the
-current implementation, not a generic checklist. No fixes were applied as part
-of the audit.
+Original read-only security audit recorded 2026-07-29. The finding narratives
+below preserve what was observed at audit time; the status lines and remediation
+update record the current implementation after the 2026-07-29 fix/retest pass.
+
+## Remediation Update - 2026-07-29
+
+- **Fixed and live-retested:** S2-S10, V1, production source-map/dev-runtime
+  exposure, TRACE stack disclosure, session caching, public health disclosure,
+  and missing browser hardening headers.
+- **Mitigated for local development:** S1. PostgreSQL now binds only to
+  `127.0.0.1`; its development credentials remain `postgres/postgres` and must
+  be replaced with a restricted application role before production.
+- **Still deployment-blocking:** V2. Production now fails closed unless Secure
+  cookies are enabled, binds to loopback, emits HSTS, and expects a trusted TLS
+  reverse proxy, but the actual proxy, certificate, HTTP-to-HTTPS redirect, and
+  cloud firewall are not defined in this repository.
+- **Accepted risk unchanged:** plaintext sender passwords in `raw_password`.
+- **Dependencies:** `npm audit --omit=dev` reports zero vulnerabilities after
+  patched PostCSS/sharp overrides. Nine high findings remain in ESLint's
+  development-only glob stack; forcing its incompatible major was rejected.
+
+Verification included a clean production build, isolated auth/session replay,
+hostile Fabric-scene round trips, and a controlled hammer pass: 800 concurrent
+reads, 200 malformed HTTP/upgrade requests, exact rate-limit boundaries, and
+WebSocket connection/handshake/message/payload limits. A proxy-specific hammer
+found and fixed one additional per-IP WebSocket accounting bug. Production then
+completed 3,600 more read requests with zero errors and normal GC cycling.
 
 ## Deployment Status
 
-**Do not expose the application to the public internet until the production
-blockers below are resolved.** The current setup is suitable for local/LAN
-development, where its trust assumptions are materially different from a
-public deployment.
+**Do not expose the application directly to the public internet.** The app is
+now fail-closed for production and loopback-only, but it still requires the TLS,
+database-role, firewall, backup, and monitoring controls listed above.
 
 ## Explicitly Accepted Risk
 
@@ -48,6 +71,9 @@ Required compensating controls while this remains:
 
 ### S1 - PostgreSQL is host-exposed with default credentials
 
+**Current status:** Partially fixed - loopback-only; production credentials and
+least-privilege role remain external deployment work.
+
 **Severity:** Critical  
 **Confidence:** Confirmed
 
@@ -73,6 +99,8 @@ Regression concern: local database tools will need a loopback-only port mapping
 or another controlled connection method.
 
 ### S2 - A source-known session signing key can be enabled by the shipped start command
+
+**Current status:** Fixed and verified.
 
 **Severity:** Critical  
 **Confidence:** Confirmed
@@ -107,6 +135,8 @@ secret instead of silently starting with a universal fallback.
 
 ### S3 - Event deletion skips the localhost admin check
 
+**Current status:** Fixed and verified.
+
 **Severity:** Medium  
 **Confidence:** Confirmed
 
@@ -125,6 +155,8 @@ Regression concern: sender-owned deletion must continue to work from LAN or a
 future public deployment.
 
 ### S4 - HTTP request body limits are bypassable
+
+**Current status:** Fixed and hammered.
 
 **Severity:** Medium  
 **Confidence:** Confirmed
@@ -151,6 +183,8 @@ than credential routes and must retain a separate controlled media limit.
 
 ### S5 - Malformed WebSocket Host can terminate the process
 
+**Current status:** Fixed and hammered.
+
 **Severity:** Medium  
 **Confidence:** Confirmed
 
@@ -169,6 +203,8 @@ Regression concern: non-RSVP upgrades must still be delegated to Next.js for
 development HMR and any framework-managed WebSockets.
 
 ### S6 - WebSocket connection and message exhaustion
+
+**Current status:** Fixed and hammered, including trusted-proxy client IPs.
 
 **Severity:** Medium  
 **Confidence:** Confirmed
@@ -193,6 +229,8 @@ Regression concern: browser ping/pong behavior and ordinary reconnects must
 continue to work.
 
 ### S7 - Stored Fabric scenes are not safely constrained
+
+**Current status:** Fixed and round-trip verified.
 
 **Severity:** Medium  
 **Confidence:** Confirmed
@@ -223,6 +261,8 @@ tests against the stricter schema.
 
 ### S8 - No per-account storage or mutation quota
 
+**Current status:** Fixed and rate-limit verified.
+
 **Severity:** Medium  
 **Confidence:** Confirmed
 
@@ -252,6 +292,8 @@ affected event must continue to work.
 
 ### S9 - Logout and password reset do not revoke copied sessions
 
+**Current status:** Fixed and copied-cookie replay verified.
+
 **Severity:** Medium  
 **Confidence:** Confirmed
 
@@ -270,6 +312,8 @@ Regression concern: decide whether an ordinary logout should affect one device
 or all devices, and preserve expected Remember Me behavior.
 
 ### S10 - Sender usernames are enumerable through login timing
+
+**Current status:** Fixed and timing verified (79 ms vs. 80 ms medians).
 
 **Severity:** Low  
 **Confidence:** Confirmed
@@ -292,6 +336,8 @@ must remain unchanged.
 
 ### V1 - A same-host reverse proxy can defeat IP security controls
 
+**Current status:** Fixed for the defined production topology and proxy-hammered.
+
 **Potential severity:** High
 
 `server.js` always replaces `X-Forwarded-For` with the direct socket address.
@@ -308,6 +354,8 @@ inbound forwarding headers.
 
 ### V2 - HTTPS and secure-cookie behavior are not defined
 
+**Current status:** Partially fixed in-app; external TLS termination remains required.
+
 **Potential severity:** High
 
 The custom server provides HTTP only. Session cookies receive the `Secure` flag
@@ -322,6 +370,9 @@ redirect HTTP to HTTPS, enable secure cookies, and add HSTS after HTTPS is
 confirmed across the intended domain.
 
 ### V3 - Current production dependency advisories
+
+**Current status:** Fixed for production dependencies; development-only ESLint
+advisories remain pending upstream-compatible releases.
 
 **Potential severity:** Medium
 
@@ -340,11 +391,9 @@ versions. Do not apply npm's suggested forced downgrade to Next 9.
 
 ## Lower-Priority Hardening
 
-- Responses disclose `X-Powered-By: Next.js`.
-- No application-defined Content Security Policy, frame-ancestor policy,
-  referrer policy, permissions policy, or production HSTS configuration was
-  found. These are useful defense-in-depth controls, but the audit did not
-  establish an independent exploit from their absence.
+- **Fixed:** `X-Powered-By` is disabled.
+- **Fixed:** centralized CSP, frame-ancestor, MIME, referrer, permissions,
+  resource, and conditional production HSTS policies are configured.
 - The public `/api/sender/has-account` endpoint reveals whether any sender
   account exists. It does not reveal which account and has limited impact.
 - Public RSVP submission intentionally allows duplicate anonymous responses.
@@ -375,8 +424,10 @@ versions. Do not apply npm's suggested forced downgrade to Next 9.
   `ILIKE` matching.
 - Guest categories, counts, answer lengths, normal text fields, image data
   URLs, and total canvas JSON size have server-side bounds.
-- The direct custom server overwrites inbound `X-Forwarded-For`, preventing a
-  direct client from spoofing its IP in the current no-proxy topology.
+- The custom server overwrites inbound `X-Forwarded-For` in development/direct
+  mode. Production accepts the rightmost forwarded client address only from a
+  configured trusted proxy socket and uses it consistently for health, HTTP
+  rate limits, and WebSocket limits.
 
 ## Areas Not Conclusively Assessed
 
@@ -389,19 +440,16 @@ Git history contains an earlier admin-credential implementation. The active
 credential is reported as rotated and stored only in `.env.local`; its value
 was deliberately not read or reproduced during this audit.
 
-## Recommended Fix Order
+## Remaining Fix Order
 
-1. Isolate PostgreSQL and replace default credentials.
-2. Add an explicit fail-closed production startup and require private session
-   secrets plus HTTPS.
-3. Fix the event-delete admin authorization path.
-4. Bound HTTP and WebSocket traffic before parsing.
-5. Strictly validate stored Fabric scenes.
-6. Add per-account storage/write quotas and scoped real-time updates.
-7. Add session revocation.
-8. Replace the malformed dummy bcrypt hash.
-9. Resolve the proxy trust model and dependency advisories.
-10. Add browser security headers as defense in depth.
+1. Deploy and test the real TLS reverse proxy/certificate/HTTP redirect.
+2. Replace PostgreSQL development credentials with generated production
+  secrets and a restricted application role on a private database network.
+3. Define backup access, monitoring, alerting, and incident response.
+4. Re-run authenticated multi-user authorization tests through the real
+  production proxy/CDN path.
+5. Upgrade the development ESLint dependency chain once compatible patched
+  releases are available.
 
 Plaintext password storage is intentionally excluded from this remediation
 order because the product owner explicitly chose to retain it. Its compensating
@@ -413,7 +461,13 @@ controls remain mandatory.
 **Assessment date:** 2026-07-29 (local), with HTTP evidence timestamped 2026-07-30 UTC  
 **Assessment type:** Unauthenticated black-box web and API assessment  
 **Report status:** Final for the completed unauthenticated black-box scope; automated scan coverage was partial  
-**Deployment recommendation:** **BLOCK DEPLOYMENT** until RSVP-001 and RSVP-005 are resolved and retested
+**Original deployment recommendation:** **BLOCK DEPLOYMENT** until RSVP-001 and RSVP-005 are resolved and retested
+
+**Remediation update (2026-07-29):** RSVP-001 through RSVP-004 and RSVP-006
+are fixed and live-retested. RSVP-005 remains external deployment work: the app
+now requires Secure cookies, emits HSTS, binds production to loopback, and
+keeps admin localhost-only, but a real TLS proxy/certificate is not in this
+repository.
 
 ## 1. Executive Summary
 

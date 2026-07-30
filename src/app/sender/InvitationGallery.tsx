@@ -10,7 +10,7 @@ import { useOptimisticActions, reinsertAt } from "@/lib/optimistic";
 import { useToast } from "@/components/ui/Toast";
 import { Modal, ModalActions } from "@/components/ui/Modal";
 import { StatsModal } from "./StatsModal";
-import type { EventRecord } from "@/lib/types";
+import type { SenderEventSummary } from "@/lib/types";
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
@@ -21,26 +21,37 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 export function InvitationGallery() {
   const showToast = useToast();
-  const [events, setEvents] = useState<EventRecord[] | null>(null);
+  const [events, setEvents] = useState<SenderEventSummary[] | null>(null);
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { messagesByType } = useWebSocket();
   const dbChanged = messagesByType["db-changed"];
   const { run } = useOptimisticActions();
 
-  const load = () => {
-    fetchJson<{ events: EventRecord[] }>("/api/sender/events")
-      .then((data) => setEvents(data.events))
+  const load = (offset = 0, append = false) => {
+    fetchJson<{ events: SenderEventSummary[]; nextOffset: number | null }>(`/api/sender/events?offset=${offset}`)
+      .then((data) => {
+        setEvents((previous) => {
+          if (!append || !previous) return data.events;
+          const existingIds = new Set(previous.map((event) => event.id));
+          return [...previous, ...data.events.filter((event) => !existingIds.has(event.id))];
+        });
+        setNextOffset(data.nextOffset);
+        setError(null);
+      })
       .catch((err) => {
         const message = err instanceof Error ? err.message : "Something went wrong";
         setError(message);
         showToast(`Couldn't load your invitations \u2014 ${message}`, "error");
-      });
+      })
+      .finally(() => setLoadingMore(false));
   };
 
   // The card disappears immediately and comes back where it was if the
   // server refuses -- see lib/optimistic.ts. Lives here (not InvitationCard)
   // since `events` is this component's own state.
-  const deleteEvent = (event: EventRecord, index: number) => {
+  const deleteEvent = (event: SenderEventSummary, index: number) => {
     void run({
       apply: () => {
         setEvents((prev) => (prev ? prev.filter((e) => e.id !== event.id) : prev));
@@ -88,17 +99,32 @@ export function InvitationGallery() {
       )}
 
       {events !== null && events.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5">
-          {events.map((event, index) => (
-            <InvitationCard key={event.id} event={event} onDelete={() => deleteEvent(event, index)} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5">
+            {events.map((event, index) => (
+              <InvitationCard key={event.id} event={event} onDelete={() => deleteEvent(event, index)} />
+            ))}
+          </div>
+          {nextOffset !== null && (
+            <button
+              type="button"
+              disabled={loadingMore}
+              onClick={() => {
+                setLoadingMore(true);
+                load(nextOffset, true);
+              }}
+              className="mt-6 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface-1)] px-4 py-2 text-sm font-semibold text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loadingMore ? "Loading..." : "Load more"}
+            </button>
+          )}
+        </>
       )}
     </div>
   );
 }
 
-function InvitationCard({ event, onDelete }: { event: EventRecord; onDelete: () => void }) {
+function InvitationCard({ event, onDelete }: { event: SenderEventSummary; onDelete: () => void }) {
   const router = useRouter();
   const [hovered, setHovered] = useState(false);
   const [arrowHovered, setArrowHovered] = useState(false);

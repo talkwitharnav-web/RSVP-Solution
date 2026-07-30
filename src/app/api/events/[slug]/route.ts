@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { initDb, pool } from "@/lib/db";
-import { requireSender } from "@/lib/auth";
+import { requireAdmin, requireSender } from "@/lib/auth";
 import { verifySessionToken, ADMIN_SESSION_COOKIE_NAME, SENDER_SESSION_COOKIE_NAME } from "@/lib/session";
 import { broadcastDbChanged } from "@/lib/ws-broadcast";
 import { isAcceptedImageDataUrl, isAcceptedImageDataUrlSize } from "@/lib/image-upload";
 import { parseGuestCategories } from "@/lib/guest-categories";
 import { sanitizeDesignConfig } from "@/lib/design-types";
 import { DESIGN_FONT_PAIRS } from "@/lib/design-fonts";
+import { toPublicEventRecord } from "@/lib/public-event";
+import { rateLimitByIdentifier } from "@/lib/rate-limit";
+import { EventQuotaError, assertSenderEventQuota, lockSenderEventQuota } from "@/lib/event-quota";
+import { isAuthSessionActive } from "@/lib/auth-session-store";
+import type { EventRecord } from "@/lib/types";
 import {
   bodyTooLarge,
   boundedText,
@@ -33,7 +38,7 @@ export async function GET(
   await initDb();
   const { slug } = await params;
 
-  const result = await pool.query(`SELECT * FROM events WHERE slug = $1`, [slug]);
+  const result = await pool.query<EventRecord>(`SELECT * FROM events WHERE slug = $1`, [slug]);
   if (result.rows.length === 0) {
     return NextResponse.json({ error: "Event not found" }, { status: 404 });
   }
@@ -42,7 +47,9 @@ export async function GET(
   if (!event.published) {
     const cookieStore = await cookies();
     const session = verifySessionToken(cookieStore.get(SENDER_SESSION_COOKIE_NAME)?.value);
-    const isOwner = session?.type === "sender" && session.userId === event.created_by;
+    const isOwner = session?.type === "sender" && session.userId === event.created_by
+      ? await isAuthSessionActive(session.sessionId, "sender", session.userId)
+      : false;
     // Same 404 (not 403) an unknown slug gets, so this can't be used to
     // confirm that a given slug exists but hasn't been published yet.
     if (!isOwner) {
@@ -50,11 +57,7 @@ export async function GET(
     }
   }
 
-  // created_by is the owning sender's user id -- internal, and of no use to
-  // a guest rendering the invitation.
-  const publicEvent = { ...event };
-  delete publicEvent.created_by;
-  return NextResponse.json(publicEvent);
+  return NextResponse.json(toPublicEventRecord(event));
 }
 
 /**
@@ -70,6 +73,9 @@ export async function PUT(
 ) {
   const auth = await requireSender();
   if (!auth.ok) return auth.response;
+
+  const limited = rateLimitByIdentifier("event-update", auth.userId, 120, 10 * 60 * 1000);
+  if (limited) return limited;
 
   if (bodyTooLarge(req, MEDIA_BODY_LIMIT)) {
     return NextResponse.json({ error: "Request body too large" }, { status: 413 });
@@ -177,28 +183,59 @@ export async function PUT(
   // a link already handed out keeps working through any number of edits).
   const published = body.published === true ? true : event.published;
 
-  const result = await pool.query(
-    `UPDATE events
-     SET title = $1, host_name = $2, description = $3, event_date = $4, location = $5, card_image_url = $6, guest_categories = $7, published = $8, design_config = $9, external_url = $10
-     WHERE slug = $11
-     RETURNING *`,
-    [
-      title,
-      hostName,
-      description,
-      eventDate,
-      location,
-      cardImageUrl,
-      JSON.stringify(guestCategories),
-      published,
-      designConfig ? JSON.stringify(designConfig) : null,
-      externalUrl,
-      slug,
-    ],
-  );
+  const client = await pool.connect();
+  let updatedEvent;
+  try {
+    await client.query("BEGIN");
+    await lockSenderEventQuota(client, auth.userId);
 
-  broadcastDbChanged("events");
-  return NextResponse.json(result.rows[0]);
+    const locked = await client.query(`SELECT created_by FROM events WHERE slug = $1 FOR UPDATE`, [slug]);
+    if (locked.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return NextResponse.json({ error: "Event not found" }, { status: 404 });
+    }
+    if (locked.rows[0].created_by !== auth.userId) {
+      await client.query("ROLLBACK");
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const result = await client.query(
+      `UPDATE events
+       SET title = $1, host_name = $2, description = $3, event_date = $4, location = $5, card_image_url = $6, guest_categories = $7, published = $8, design_config = $9, external_url = $10
+       WHERE slug = $11
+       RETURNING *`,
+      [
+        title,
+        hostName,
+        description,
+        eventDate,
+        location,
+        cardImageUrl,
+        JSON.stringify(guestCategories),
+        published,
+        designConfig ? JSON.stringify(designConfig) : null,
+        externalUrl,
+        slug,
+      ],
+    );
+    updatedEvent = result.rows[0];
+    await assertSenderEventQuota(client, auth.userId);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof EventQuotaError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.reason === "storage" ? 413 : 409 },
+      );
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  broadcastDbChanged("events", slug);
+  return NextResponse.json(updatedEvent);
 }
 
 /**
@@ -215,14 +252,17 @@ export async function DELETE(
 ) {
   const cookieStore = await cookies();
   const adminSession = verifySessionToken(cookieStore.get(ADMIN_SESSION_COOKIE_NAME)?.value);
-  const isAdmin = adminSession?.type === "admin";
+  const adminAuth = adminSession?.type === "admin" ? await requireAdmin() : null;
+  const isAdmin = adminAuth?.ok === true;
 
   await initDb();
   const { slug } = await params;
 
-  if (!isAdmin) {
+  if (isAdmin) {
+    // Fully validated above, including localhost and persisted revocation.
+  } else {
     const auth = await requireSender();
-    if (!auth.ok) return auth.response;
+    if (!auth.ok) return adminAuth && !adminAuth.ok ? adminAuth.response : auth.response;
 
     const existing = await pool.query(`SELECT created_by FROM events WHERE slug = $1`, [slug]);
     if (existing.rows.length === 0) {
@@ -238,6 +278,6 @@ export async function DELETE(
     return NextResponse.json({ error: "Event not found" }, { status: 404 });
   }
 
-  broadcastDbChanged("events");
+  broadcastDbChanged("events", slug);
   return NextResponse.json({ message: "Event deleted successfully" });
 }

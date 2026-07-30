@@ -137,4 +137,20 @@ async function migrate(): Promise<void> {
       "case-insensitive login stays unambiguous.",
     );
   }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      session_type TEXT NOT NULL CHECK (session_type IN ('admin', 'sender')),
+      user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      CONSTRAINT auth_sessions_owner_check CHECK (
+        (session_type = 'admin' AND user_id IS NULL) OR
+        (session_type = 'sender' AND user_id IS NOT NULL)
+      )
+    );
+    CREATE INDEX IF NOT EXISTS auth_sessions_user_id_idx ON auth_sessions(user_id);
+    CREATE INDEX IF NOT EXISTS auth_sessions_expires_at_idx ON auth_sessions(expires_at);
+  `);
 }

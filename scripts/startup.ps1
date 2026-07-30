@@ -118,6 +118,11 @@ if (-not (Test-Path $envLocal)) {
 } else {
     Write-Ok ".env.local already exists."
 }
+node (Join-Path $PSScriptRoot "ensure-session-secret.mjs") $envLocal
+if ($LASTEXITCODE -ne 0) {
+    Write-Err "Could not configure SESSION_SECRET in .env.local."
+    exit 1
+}
 
 # ---------------------------------------------------------------------------
 # 6. npm dependencies

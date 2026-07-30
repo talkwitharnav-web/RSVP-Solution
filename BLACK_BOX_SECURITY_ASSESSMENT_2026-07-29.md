@@ -4,7 +4,17 @@
 **Assessment date:** 2026-07-29 (local), with HTTP evidence timestamped 2026-07-30 UTC  
 **Assessment type:** Unauthenticated black-box web and API assessment  
 **Report status:** Final for the completed unauthenticated black-box scope; automated scan coverage was partial  
-**Deployment recommendation:** **BLOCK DEPLOYMENT** until RSVP-001 and RSVP-005 are resolved and retested
+**Original deployment recommendation:** **BLOCK DEPLOYMENT** until RSVP-001 and RSVP-005 are resolved and retested
+
+**Remediation update (2026-07-29):** RSVP-001 through RSVP-004 and RSVP-006
+are fixed and live-retested. Production serves no dev manifests/maps/HMR
+markers, TRACE is a small 405, public health is minimal, session responses are
+private/no-store, and centralized security headers are present. RSVP-005 is
+partially addressed in-app (production requires Secure cookies, emits HSTS,
+binds to loopback, and keeps admin localhost-only), but deployment remains
+blocked until a real TLS reverse proxy/certificate and HTTP-to-HTTPS boundary
+are configured.
+The findings below retain the original black-box evidence.
 
 ## 1. Executive Summary
 

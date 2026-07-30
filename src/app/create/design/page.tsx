@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { verifySessionToken, SENDER_SESSION_COOKIE_NAME } from "@/lib/session";
+import { isAuthSessionActive } from "@/lib/auth-session-store";
 import DesignEditor from "./DesignEditor";
 
 /**
@@ -17,7 +18,10 @@ import DesignEditor from "./DesignEditor";
 export default async function CreateDesignPage() {
   const cookieStore = await cookies();
   const session = verifySessionToken(cookieStore.get(SENDER_SESSION_COOKIE_NAME)?.value);
-  if (session?.type !== "sender") redirect("/sender/login");
+  const sessionActive = session?.type === "sender"
+    ? await isAuthSessionActive(session.sessionId, "sender", session.userId)
+    : false;
+  if (!sessionActive) redirect("/sender/login");
 
   return <DesignEditor />;
 }
